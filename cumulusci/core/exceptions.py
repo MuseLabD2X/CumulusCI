@@ -178,6 +178,18 @@ class ScratchOrgException(SfdxOrgException):
     pass
 
 
+class SignupRequestError(CumulusCIFailure):
+    """Raise for errors from the SignupRequest API"""
+
+    pass
+
+
+class OrgAlreadyExists(CumulusCIFailure):
+    """Raise if an org exists when not expected to"""
+
+    pass
+
+
 class GithubException(CumulusCIException):
     """Raise for errors related to GitHub"""
 

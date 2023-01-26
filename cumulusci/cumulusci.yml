@@ -494,6 +494,10 @@ tasks:
         class_path: cumulusci.tasks.metadata_etl.help_text.SetFieldHelpText
         options:
             namespace_inject: $project_config.project__package__namespace
+    signup:
+        group: Org Provisioning
+        description: Create a new org using the SignupRequest API and add it to the keychain
+        class_path: cumulusci.tasks.salesforce.signup.SignupRequest
     snapshot_changes:
         description: Tell SFDX source tracking to ignore previous changes in a scratch org
         class_path: cumulusci.tasks.salesforce.sourcetracking.SnapshotChanges
