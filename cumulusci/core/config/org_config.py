@@ -142,12 +142,6 @@ class OrgConfig(BaseConfig):
             client_id = connected_app.client_id
             client_secret = connected_app.client_secret
 
-        if not self.refresh_token:
-            self.logger.warn(
-                f"Skipping access token refresh for {self.name}, no refresh token available"
-            )
-            return self.config
-
         sf_oauth_config = OAuth2ClientConfig(
             client_id=client_id,
             client_secret=client_secret,

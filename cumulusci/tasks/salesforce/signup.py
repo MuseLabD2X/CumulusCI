@@ -86,14 +86,9 @@ class SignupRequest(BaseSalesforceApiTask):
         self.return_values["signup_id"] = response["id"]
         # Wait for the signuprequest to complete
         self._poll()
-        access_token = self._get_access_token()
+        auth_result = self._exchange_auth_code()
         config = self.return_values.copy()
-        config.update(
-            {
-                "access_token": access_token,
-                "is_sandbox": False,
-            }
-        )
+        config.update(auth_result)
         org_config = SignupOrgConfig(
             name=self.options["org_name"],
             config=config,
@@ -126,7 +121,7 @@ class SignupRequest(BaseSalesforceApiTask):
                 f"SignupRequest {self.return_values['signup_id']} Status: {status}"
             )
 
-    def _get_access_token(self):
+    def _exchange_auth_code(self):
         oauth_config = OAuth2ClientConfig(
             client_id=self.connected_app.client_id,
             client_secret=self.connected_app.client_secret,
@@ -137,4 +132,4 @@ class SignupRequest(BaseSalesforceApiTask):
         )
         oauth = OAuth2Client(oauth_config)
         auth_result = oauth.auth_code_grant(self.auth_code).json()
-        return auth_result["access_token"]
+        return auth_result
