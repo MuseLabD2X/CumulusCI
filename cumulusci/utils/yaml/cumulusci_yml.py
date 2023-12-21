@@ -224,6 +224,7 @@ class CumulusCLIConfig(CCIDictModel):
 
 
 class CumulusCIRoot(CCIDictModel):
+    plugins: List[str] = []
     tasks: Dict[str, Task] = {}
     flows: Dict[str, Flow] = {}
     project: Project = {}
