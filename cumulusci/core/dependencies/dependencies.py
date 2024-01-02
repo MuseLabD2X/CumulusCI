@@ -62,6 +62,8 @@ def _validate_github_parameters(values):
         values.pop("repo_owner")
         values.pop("repo_name")
 
+    values["github"] = values["github"].lower()
+
     return values
 
 
@@ -624,7 +626,6 @@ class UnmanagedDependency(StaticDependency, abc.ABC):
         return package_zip
 
     def install(self, context: BaseProjectConfig, org: OrgConfig):
-
         context.logger.info(f"Deploying unmanaged metadata from {self.description}")
 
         package_zip_builder = self.get_metadata_package_zip_builder(context, org)

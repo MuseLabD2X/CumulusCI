@@ -302,6 +302,9 @@ class AbstractGitHubCommitStatusPackageResolver(AbstractResolver, abc.ABC):
         context.logger.warn(
             f"{self.name} did not locate package package version on {repo.clone_url}."
         )
+        import pdb
+
+        pdb.set_trace()
         return (None, None)
 
 
@@ -545,7 +548,6 @@ def dependency_filter_ignore_deps(ignore_deps: List[dict]) -> Callable:
     ignore_namespace = [d["namespace"] for d in ignore_deps if "namespace" in d]
 
     def should_include(some_dep: Dependency) -> bool:
-
         if isinstance(some_dep, PackageNamespaceVersionDependency):
             return some_dep.namespace not in ignore_namespace
         if isinstance(some_dep, BaseGitHubDependency):
