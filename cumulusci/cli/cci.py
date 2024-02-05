@@ -10,6 +10,7 @@ import requests
 import rich
 from rich.console import Console
 from rich.markup import escape
+from trogon import tui
 
 import cumulusci
 from cumulusci.core.debug import set_debug_mode
@@ -192,6 +193,7 @@ def version_info_wrapper(
     ctx.exit()
 
 
+@tui()
 @click.group("main", help="")
 @click.option(  # based on https://click.palletsprojects.com/en/8.1.x/options/#callbacks-and-eager-options
     "--version",

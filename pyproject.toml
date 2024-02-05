@@ -57,6 +57,7 @@ dependencies = [
     "simple-salesforce==1.11.4",
     "snowfakery",
     "SQLAlchemy",
+    "trogon",
     "xmltodict",
 ]
 
