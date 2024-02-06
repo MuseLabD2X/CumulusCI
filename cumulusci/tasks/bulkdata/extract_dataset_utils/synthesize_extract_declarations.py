@@ -2,7 +2,7 @@ import collections
 import re
 import typing as T
 
-from pydantic import validator
+from pydantic import field_validator
 
 from cumulusci.salesforce_api.org_schema import NOT_EXTRACTABLE, Field, Schema
 from cumulusci.utils.iterators import partition
@@ -15,7 +15,8 @@ class SimplifiedExtractDeclaration(ExtractDeclaration):
     # a model where sf_object references a single sf_object
     # and every field is a single field name, rather
     # than a group declaration like FIELDS(xxx)
-    @validator("sf_object")
+    @field_validator("sf_object")
+    @classmethod
     def sf_object_fits_pattern(cls, val):
         assert val.isidentifier()
         return val

@@ -74,10 +74,10 @@ class AddRelatedLists(MetadataSingleEntityTransformTask):
 
 
 class AddFieldsPosition(BaseModel):
-    field: Optional[str]
-    column: Optional[Literal["first", "last"]]
+    field: Optional[str] = None
+    column: Optional[Literal["first", "last"]] = None
     relative: Literal["before", "after", "top", "bottom"]
-    section: Optional[int]
+    section: Optional[int] = None
 
     @root_validator
     def columns_not_compatible_with_fields(cls, values):
@@ -113,23 +113,23 @@ class AddFieldsPosition(BaseModel):
 
 class AddFieldOptions(BaseModel):
     api_name: str
-    position: Optional[List[AddFieldsPosition]]
+    position: Optional[List[AddFieldsPosition]] = None
     required: bool = False
     read_only: bool = False
 
 
 class AddPagesOptions(BaseModel):
     api_name: str
-    height: Optional[int]
+    height: Optional[int] = None
     show_label: bool = False
     show_scrollbars: bool = False
-    width: Optional[str]
-    position: Optional[List[AddFieldsPosition]]
+    width: Optional[str] = None
+    position: Optional[List[AddFieldsPosition]] = None
 
 
 class AddFieldsToLayoutOptions(BaseModel):
-    fields: Optional[List[AddFieldOptions]]
-    pages: Optional[List[AddPagesOptions]]
+    fields: Optional[List[AddFieldOptions]] = None
+    pages: Optional[List[AddPagesOptions]] = None
 
 
 class AddFieldsToPageLayout(MetadataSingleEntityTransformTask):

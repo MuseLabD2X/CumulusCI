@@ -6,7 +6,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import IO, Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
-from pydantic import Field, ValidationError, root_validator, validator
+from pydantic import field_validator, model_validator, ConfigDict, Field, ValidationError, root_validator, validator
 from requests.structures import CaseInsensitiveDict as RequestsCaseInsensitiveDict
 from simple_salesforce import Salesforce
 from typing_extensions import Literal
@@ -66,11 +66,9 @@ class MappingLookup(CCIDictModel):
             f"Could not find a key field for {self.name}.\n"
             + f"Tried {', '.join(guesses)}"
         )
-
-    class Config:
-        # name is an injected field (from the parent dict)
-        # so don't try to serialize it as part of the model
-        fields = {"name": {"exclude": True}}
+    # TODO[pydantic]: The following keys were removed: `fields`.
+    # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-config for more information.
+    model_config = ConfigDict(fields={"name": {"exclude": True}})
 
 
 SHOULD_REPORT_RECORD_TYPE_DEPRECATION = True
@@ -108,14 +106,16 @@ class MappingStep(CCIDictModel):
     soql_filter: Optional[str] = None  # soql_filter property
     update_key: T.Union[str, T.Tuple[str, ...]] = ()  # only for upserts
 
-    @validator("bulk_mode", "api", "action", pre=True)
+    @field_validator("bulk_mode", "api", "action", mode="before")
+    @classmethod
     def case_normalize(cls, val):
         if isinstance(val, Enum):
             return val
         if val is not None:
             return ENUM_VALUES.get(val.lower())
 
-    @validator("update_key", pre=True)
+    @field_validator("update_key", mode="before")
+    @classmethod
     def split_update_key(cls, val):
         if isinstance(val, (list, tuple)):
             assert all(isinstance(v, str) for v in val), "All keys should be strings"
@@ -208,6 +208,8 @@ class MappingStep(CCIDictModel):
 
         return (date_fields, date_time_fields, date.today())
 
+    # TODO[pydantic]: We couldn't refactor the `validator`, please replace it by `field_validator` manually.
+    # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-validators for more information.
     @validator("batch_size")
     @classmethod
     def validate_batch_size(cls, v, values):
@@ -228,13 +230,15 @@ class MappingStep(CCIDictModel):
             assert f"Unknown API {values['api']}"
         return v
 
-    @validator("anchor_date")
+    @field_validator("anchor_date")
+    @classmethod
     @classmethod
     def validate_anchor_date(cls, v):
         if v is not None:
             return iso_to_date(v)
 
-    @validator("record_type")
+    @field_validator("record_type")
+    @classmethod
     @classmethod
     def record_type_is_deprecated(cls, v):
         if SHOULD_REPORT_RECORD_TYPE_DEPRECATION:
@@ -243,7 +247,8 @@ class MappingStep(CCIDictModel):
             )
         return v
 
-    @validator("oid_as_pk")
+    @field_validator("oid_as_pk")
+    @classmethod
     @classmethod
     def oid_as_pk_is_deprecated(cls, v):
         if v:
@@ -252,7 +257,8 @@ class MappingStep(CCIDictModel):
             )
         return v
 
-    @validator("fields_", pre=True)
+    @field_validator("fields_", mode="before")
+    @classmethod
     @classmethod
     def standardize_fields_to_dict(cls, values):
         if values is None:
@@ -565,7 +571,8 @@ class MappingSteps(CCIDictModel):
     "Mapping of named steps"
     __root__: Dict[str, MappingStep]
 
-    @root_validator(pre=False)
+    @model_validator()
+    @classmethod
     @classmethod
     def validate_and_inject_mapping(cls, values):
         if values:

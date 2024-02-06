@@ -6,7 +6,7 @@ from unittest.mock import Mock
 from zipfile import ZipFile
 
 from github3.repos.repo import Repository
-from pydantic import BaseModel
+from pydantic import ConfigDict, BaseModel
 
 from cumulusci.core.dependencies.dependencies import (
     Dependency,
@@ -28,24 +28,20 @@ from cumulusci.utils.xml import metadata_tree
 
 
 class Package(BaseModel):
-    repo: Optional[Union[Repository, Mock]]
+    repo: Optional[Union[Repository, Mock]] = None
     package_name: str
     namespace: str
     prefix_release: str
 
     def __hash__(self) -> int:
         return self.repo.__hash__()
-
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class PackageVersion(BaseModel):
     package: Package
     version: LooseVersion
-
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class SObjectDetail(BaseModel):

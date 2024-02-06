@@ -24,8 +24,8 @@ class RemoteSiteSetting(BaseModel):
     full_name: str
     url: str
     is_active: bool
-    description: Optional[str]
-    disable_protocol_security: Optional[bool]
+    description: Optional[str] = None
+    disable_protocol_security: Optional[bool] = None
 
 
 class RSSOptions(BaseModel):

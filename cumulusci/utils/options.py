@@ -64,6 +64,8 @@ class CCIOptionType:
     name = None
 
     @classmethod
+    # TODO[pydantic]: We couldn't refactor `__get_validators__`, please create the `__get_pydantic_core_schema__` manually.
+    # Check https://docs.pydantic.dev/latest/migration/#defining-custom-types for more information.
     def __get_validators__(cls):
         "https://pydantic-docs.helpmanual.io/usage/types/#classes-with-__get_validators__"
         yield cls.validate
@@ -87,7 +89,7 @@ class CCIOptionType:
 
         Dummy = create_model(cls.name or cls.__name__, __root__=(target_type, ...))
 
-        return Dummy.parse_obj(v).__root__
+        return Dummy.parse_obj(v).root
 
 
 class ListOfStringsOption(CCIOptionType):

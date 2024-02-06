@@ -39,7 +39,7 @@ dependencies = [
     "markdown-it-py==2.2.0", # resolve dependency conflict between prod/dev
     "MarkupSafe",
     "psutil",
-    "pydantic<2",
+    "pydantic",
     "PyJWT",
     "pytz",
     "pyyaml",
@@ -55,7 +55,7 @@ dependencies = [
     "sarge",
     "selenium<4",
     "simple-salesforce==1.11.4",
-    "snowfakery",
+    "snowfakery = { git = \"https://github.com/muselab-d2x/Snowfakery\", branch = \"feature/pydantic2\" }",
     "SQLAlchemy",
     "xmltodict",
 ]

@@ -10,7 +10,7 @@ from pathlib import Path
 from zipfile import ZipFile
 
 from lxml import etree as ET
-from pydantic import BaseModel, root_validator
+from pydantic import model_validator, BaseModel, root_validator
 
 from cumulusci.core.dependencies.utils import TaskContext
 from cumulusci.core.enums import StrEnum
@@ -77,7 +77,8 @@ class SourceTransformSpec(BaseModel):
 class SourceTransformList(BaseModel):
     __root__: T.List[SourceTransformSpec]
 
-    @root_validator(pre=True)
+    @model_validator(mode="before")
+    @classmethod
     def validate_spec_list(cls, values):
         values["__root__"] = [
             {"transform": s} if isinstance(s, str) else s for s in values["__root__"]

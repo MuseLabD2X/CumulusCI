@@ -928,12 +928,12 @@ def test_source_transform_parsing():
         ]
     )
 
-    assert len(tl.__root__) == 3
-    assert isinstance(tl.__root__[0], SourceTransformSpec)
-    assert isinstance(tl.__root__[1], SourceTransformSpec)
-    assert tl.__root__[1].parsed_options() is not None
-    assert isinstance(tl.__root__[2], SourceTransformSpec)
-    assert tl.__root__[2].parsed_options() is None
+    assert len(tl.root) == 3
+    assert isinstance(tl.root[0], SourceTransformSpec)
+    assert isinstance(tl.root[1], SourceTransformSpec)
+    assert tl.root[1].parsed_options() is not None
+    assert isinstance(tl.root[2], SourceTransformSpec)
+    assert tl.root[2].parsed_options() is None
 
     tf = tl.as_transforms()
 

@@ -2,7 +2,7 @@ import re
 import typing as T
 from pathlib import Path
 
-from pydantic import Field, validator
+from pydantic import field_validator, Field
 
 from cumulusci.core.enums import StrEnum
 from cumulusci.tasks.bulkdata.step import DataApi
@@ -59,7 +59,8 @@ class ExtractDeclaration(HashableBaseModel):
             self.where and self.is_group
         ), "Cannot specify a `where` clause on a declaration for multiple kinds of objects."
 
-    @validator("fields_")
+    @field_validator("fields_")
+    @classmethod
     def normalize_fields(cls, vals):
         if isinstance(vals, str):
             vals = [vals]
@@ -108,7 +109,8 @@ class ExtractRulesFile(CCIDictModel):
     version: int = 1
     extract: T.Dict[str, ExtractDeclaration]
 
-    @validator("extract")
+    @field_validator("extract")
+    @classmethod
     def inject_sf_object_name(cls, val):
         for sf_object, decl in val.items():
             decl.sf_object = sf_object

@@ -63,18 +63,24 @@ class PackageConfig(BaseModel):
     version_base: Optional[str] = None
     version_type: VersionTypeEnum = VersionTypeEnum.minor
 
+    # TODO[pydantic]: We couldn't refactor the `validator`, please replace it by `field_validator` manually.
+    # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-validators for more information.
     @validator("org_dependent")
     def org_dependent_must_be_unlocked(cls, v, values):
         if v and values["package_type"] != PackageTypeEnum.unlocked:
             raise ValueError("Only unlocked packages can be org-dependent.")
         return v
 
+    # TODO[pydantic]: We couldn't refactor the `validator`, please replace it by `field_validator` manually.
+    # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-validators for more information.
     @validator("post_install_script")
     def post_install_script_must_be_managed(cls, v, values):
         if v and values["package_type"] != PackageTypeEnum.managed:
             raise ValueError("Only managed packages can have a post-install script.")
         return v
 
+    # TODO[pydantic]: We couldn't refactor the `validator`, please replace it by `field_validator` manually.
+    # Check https://docs.pydantic.dev/dev-v2/migration/#changes-to-validators for more information.
     @validator("uninstall_script")
     def uninstall_script_must_be_managed(cls, v, values):
         if v and values["package_type"] != PackageTypeEnum.managed:

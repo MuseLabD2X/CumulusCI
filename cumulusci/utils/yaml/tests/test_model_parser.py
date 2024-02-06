@@ -13,7 +13,7 @@ class Foo(CCIModel):
 
 
 class Document(CCIModel):
-    __root__: Foo
+    root: Foo
 
 
 class TestCCIModel:
@@ -64,7 +64,7 @@ class TestCCIModel:
             bar: int = None
 
         class DocumentWithError(CCIModel):
-            __root__: FooWithError
+            root: FooWithError
 
         s = StringIO("{bar: 'blah'}")
         s.name = "some_filename"
@@ -83,7 +83,7 @@ class TestCCIModel:
             bar: Bar = None
 
         class Document(CCIModel):
-            __root__: Baz
+            root: Baz
 
         s = StringIO("{bar: {foo: {}}}")
         s.name = "some_filename"
@@ -118,7 +118,7 @@ class TestCCIDictModel:
             fields_ = Field([], alias="fields")
 
         class Document(CCIDictModel):
-            __root__: Foo
+            root: Foo
 
         # JSON is YAML. Strange but true.
         foo = Document.parse_from_yaml(StringIO("{bar: 'blah'}"))

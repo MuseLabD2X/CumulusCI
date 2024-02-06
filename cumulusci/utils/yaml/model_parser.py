@@ -1,13 +1,13 @@
 from pathlib import Path, Sequence
 from typing import IO, Union
 
-from pydantic import BaseModel, ValidationError
+from pydantic import ConfigDict, RootModel, ValidationError
 from pydantic.error_wrappers import ErrorWrapper
 
 from cumulusci.utils.yaml.safer_loader import load_from_source, load_yaml_data
 
 
-class CCIModel(BaseModel):
+class CCIModel(RootModel):
     # Base class for CumulusCI's Pydantic models
 
     _magic_fields = ["fields"]
@@ -18,7 +18,7 @@ class CCIModel(BaseModel):
         with load_from_source(source) as (f, path):
             data = load_yaml_data(f)
             obj = cls.parse_obj(data, path)
-            return getattr(obj, "__root__", obj)
+            return getattr(obj, "root", obj)
 
     @classmethod
     def parse_obj(cls, data: Union[dict, list], path: str = None):
@@ -84,16 +84,7 @@ class CCIModel(BaseModel):
         else:
             return super().copy(self, *args, **kwargs)
 
-    class Config:
-        """Pydantic Config
-
-        If you replace this config class in a sub-class, make sure you replace
-        the parameter below too.
-
-        https://pydantic-docs.helpmanual.io/usage/model_config/
-        """
-
-        extra = "forbid"
+    model_config = ConfigDict(extra="forbid")
 
 
 class CCIDictModel(CCIModel):

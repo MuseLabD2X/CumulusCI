@@ -7,7 +7,7 @@ from multiprocessing import Queue
 from pathlib import Path
 from traceback import format_exc
 
-from pydantic import BaseModel
+from pydantic import ConfigDict, BaseModel
 
 from cumulusci.core.config import (
     BaseConfig,
@@ -30,9 +30,7 @@ class SharedConfig(BaseModel):
     redirect_logging: bool
     connected_app: T.Optional[BaseConfig]  # a connected app service
     outbox_dir: Path  # where do jobs go when they are done
-
-    class Config:
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class WorkerConfig(SharedConfig):

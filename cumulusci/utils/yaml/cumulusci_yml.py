@@ -9,7 +9,7 @@ from logging import getLogger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
-from pydantic import Field, root_validator, validator
+from pydantic import field_validator, model_validator, Field, root_validator
 from pydantic.types import DirectoryPath
 from typing_extensions import Literal, TypedDict
 
@@ -49,7 +49,8 @@ class Step(CCIDictModel):
     checks: List[PreflightCheck] = []
     description: str = None
 
-    @root_validator()
+    @model_validator()
+    @classmethod
     def _check(cls, values):
         has_task = values.get("task") and values["task"] != "None"
         has_flow = values.get("flow") and values["flow"] != "None"
@@ -139,7 +140,7 @@ class Project(CCIDictModel):
     git: Optional[Git] = None
     dependencies: Optional[List[Dict[str, str]]] = None
     dependency_resolutions: Optional[DependencyResolutions] = None
-    dependency_pins: Optional[List[Dict[str, str]]]
+    dependency_pins: Optional[List[Dict[str, str]]] = None
     source_format: Literal["sfdx", "mdapi"] = "mdapi"
     custom: Optional[Dict] = None
 
@@ -167,7 +168,7 @@ class ServiceAttribute(CCIDictModel):
 
 class Service(CCIDictModel):
     description: str = None
-    class_path: Optional[str]
+    class_path: Optional[str] = None
     attributes: Dict[str, ServiceAttribute] = None
     validator: PythonClassPath = None
 
@@ -184,13 +185,13 @@ class GitHubSourceRelease(StrEnum):
 
 class GitHubSourceModel(HashableBaseModel):
     github: str
-    resolution_strategy: Optional[str]
-    commit: Optional[str]
-    ref: Optional[str]
-    branch: Optional[str]
-    tag: Optional[str]
-    release: Optional[GitHubSourceRelease]
-    description: Optional[str]
+    resolution_strategy: Optional[str] = None
+    commit: Optional[str] = None
+    ref: Optional[str] = None
+    branch: Optional[str] = None
+    tag: Optional[str] = None
+    release: Optional[GitHubSourceRelease] = None
+    description: Optional[str] = None
     allow_remote_code: Optional[bool] = False
 
     @root_validator
@@ -236,7 +237,8 @@ class CumulusCIRoot(CCIDictModel):
     sources: Dict[str, Union[LocalFolderSourceModel, GitHubSourceModel]] = {}
     cli: CumulusCLIConfig = None
 
-    @validator("plans")
+    @field_validator("plans")
+    @classmethod
     def validate_plan_tiers(cls, plans):
         existing_tiers = [plan.tier for plan in plans.values()]
         has_duplicate_tiers = any(
@@ -248,7 +250,7 @@ class CumulusCIRoot(CCIDictModel):
 
 
 class CumulusCIFile(CCIDictModel):
-    __root__: Union[CumulusCIRoot, None]
+    root: Union[CumulusCIRoot, None] = None
 
 
 def parse_from_yaml(source) -> dict:
@@ -287,7 +289,7 @@ def _log_yaml_errors(logger, errors: List[ErrorDict]):
     plural = "" if len(errors) <= 1 else "s"
     logger.warning(f"CumulusCI Configuration Warning{plural}:")
     for error in errors:
-        loc = " -> ".join(repr(x) for x in error["loc"] if x != "__root__")
+        loc = " -> ".join(repr(x) for x in error["loc"] if x != "root")
         logger.warning("  %s\n    %s", loc, error["msg"])
     if not has_shown_yaml_error_message:
         logger.error(
