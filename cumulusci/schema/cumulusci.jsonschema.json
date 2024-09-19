@@ -365,6 +365,13 @@
                     "title": "Name",
                     "type": "string"
                 },
+                "project_code": {
+                    "title": "Project Code",
+                    "description": "Two-letter project code used in naming conventions such as scratch org snapshot names.",
+                    "maxLength": 2,
+                    "minLength": 2,
+                    "type": "string"
+                },
                 "package": {
                     "$ref": "#/definitions/Package"
                 },

@@ -135,6 +135,11 @@ class DependencyResolutions(CCIDictModel):
 
 class Project(CCIDictModel):
     name: Optional[str] = None
+    project_code: Optional[str] = Field(
+        min_length=2,
+        max_length=2,
+        description="Two-letter project code used in naming conventions such as scratch org snapshot names.",
+    )
     package: Optional[Package] = None
     test: Optional[Test] = None
     git: Optional[Git] = None

@@ -197,6 +197,8 @@ tasks:
         group: Org Snapshots
         description: Create a Scratch Org Snapshot of the current scratch org in the default SF CLI devhub
         class_path: cumulusci.tasks.snapshot.CreateScratchOrgSnapshot
+        options:
+            wait: True
     create_unmanaged_ee_src:
         description: Modifies the src directory for unmanaged deployment to an EE org
         class_path: cumulusci.tasks.metadata.ee_src.CreateUnmanagedEESrc

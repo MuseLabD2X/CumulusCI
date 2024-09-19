@@ -1,13 +1,20 @@
 import json
 import os
 import time
+from typing import Dict, Optional
+import yaml
 from datetime import datetime, timedelta
 from dateutil.parser import parse
-from cumulusci.core.exceptions import CumulusCIException, SalesforceException
+from cumulusci.core.exceptions import (
+    SalesforceException,
+    ScratchOrgSnapshotError,
+    ScratchOrgSnapshotFailure,
+)
 from cumulusci.core.sfdx import sfdx
-from cumulusci.core.utils import process_bool_arg
+from cumulusci.core.utils import process_bool_arg, process_list_arg
 from cumulusci.salesforce_api.utils import get_simple_salesforce_connection
 from cumulusci.tasks.salesforce import BaseSalesforceTask
+from cumulusci.tasks.devhub import BaseDevhubTask
 from cumulusci.tasks.github.base import BaseGithubTask
 from github3 import GitHubError
 from pydantic import BaseModel, Field, validator
@@ -52,6 +59,8 @@ class SnapshotNameValidator(BaseModel):
             raise ValueError("Snapshot name cannot exceed 13 characters")
         if not name.isalnum():
             raise ValueError("Snapshot name must only contain alphanumeric characters")
+        if name[0].isdigit():
+            raise ValueError("Snapshot name must start with a letter")
         return name
 
 
@@ -70,13 +79,30 @@ class SnapshotManager:
         self.logger.info(f"Generated temporary snapshot name: {temp_name}")
         return temp_name
 
+    def query(
+        self,
+        snapshot_id: Optional[str] = None,
+        snapshot_name: Optional[str] = None,
+        description: Optional[str] = None,
+        status: Optional[list] = None,
+    ):
+        query = f"SELECT {', '.join(ORG_SNAPSHOT_FIELDS)} FROM OrgSnapshot WHERE SnapshotName = '{snapshot_name}'"
+        where = []
+        if snapshot_id:
+            where.append(f"Id = '{snapshot_id}'")
+        if snapshot_name:
+            where.append(f"SnapshotName = '{snapshot_name}'")
+        if description:
+            where.append(f"Description LIKE '{description}'")
+        if status:
+            where.append(f"Status IN ({', '.join([f'\'{s}\'' for s in status])})")
+        return self.devhub.query(query)
+
     def query_existing_active_snapshot(self, snapshot_name: str):
         self.logger.info(
             f"Checking for existing active snapshot with name: {snapshot_name}"
         )
-        query = f"SELECT Id FROM OrgSnapshot WHERE Status = 'Active' AND SnapshotName = '{snapshot_name}'"
-        result = self.devhub.query(query)
-
+        result = self.query(snapshot_name=snapshot_name, status=["Active"])
         if result["totalSize"] > 0:
             self.existing_active_snapshot_id = result["records"][0]["Id"]
             self.logger.info(
@@ -89,8 +115,7 @@ class SnapshotManager:
         self.logger.info(
             f"Checking for in-progress snapshot with name: {snapshot_name}"
         )
-        query = f"SELECT Id FROM OrgSnapshot WHERE Status in ('Active','InProgress') AND SnapshotName = '{snapshot_name}'"
-        result = self.devhub.query(query)
+        result = self.query(snapshot_name=snapshot_name, status=["In Progress"])
 
         if result["totalSize"] > 0:
             snapshot_id = result["records"][0]["Id"]
@@ -119,8 +144,8 @@ class SnapshotManager:
             return snapshot_id
         except SalesforceException as e:
             if "NOT_FOUND" in str(e):
-                raise SnapshotError(
-                    "Org snapshot feature is not enabled for this Dev Hub."
+                raise ScratchOrgSnapshotError(
+                    "Org snapshot feature is not enabled for this Dev Hub or the OrgSnapshot object is not accessible to the user."
                 ) from e
             raise
 
@@ -140,7 +165,7 @@ class SnapshotManager:
             try:
                 snapshot = self.devhub.OrgSnapshot.get(snapshot_id)
             except SalesforceResourceNotFound as exc:
-                raise SnapshotError(
+                raise ScratchOrgSnapshotFailure(
                     "Snapshot not found. This usually happens because another build deleted the snapshot while it was being built."
                 ) from exc
 
@@ -155,7 +180,7 @@ class SnapshotManager:
                 return snapshot
             if status == "Error":
                 progress.update(task, completed=100)
-                raise SnapshotError(
+                raise ScratchOrgSnapshotFailure(
                     f"Snapshot {snapshot_id} failed to complete. Error: {snapshot.get('Error')}"
                 )
 
@@ -268,532 +293,162 @@ class SnapshotManager:
             return snapshot
 
 
-class BaseDevhubTask(BaseSalesforceTask):
-    """Base class for tasks that need DevHub access."""
-
-    def _init_task(self):
-        super()._init_task()
-        self.devhub = self._get_devhub_api()
-
-    def _get_devhub_api(self, base_url=None):
-        self.logger.info("Getting Dev Hub access token")
-        p = sfdx("config get target-dev-hub --json")
-        try:
-            devhub_username = json.loads(p.stdout_text.read())["result"][0]["value"]
-        except (json.JSONDecodeError, KeyError):
-            raise SnapshotError(
-                f"Failed to get Dev Hub username from sfdx: {p.stdout_text.read()}"
-            )
-
-        p = sfdx(
-            f"force:org:display --json",
-            username=devhub_username,
-            log_note="Getting Dev Hub org info",
-        )
-        try:
-            devhub_info = json.loads(p.stdout_text.read())["result"]
-        except (json.JSONDecodeError, KeyError):
-            raise SnapshotError(
-                f"Failed to get Dev Hub information from sfdx: {p.stdout_text.read()}"
-            )
-
-        devhub = DevHubOrgConfig(
-            access_token=devhub_info["accessToken"],
-            instance_url=devhub_info["instanceUrl"],
-        )
-        return get_simple_salesforce_connection(
-            project_config=self.project_config,
-            org_config=devhub,
-            api_version=self.api_version,
-            base_url=base_url,
-        )
 
 
-class SnapshotError(CumulusCIException):
-    pass
+
+base_create_scratch_org_snapshot_options = {
+    "flows": {
+        "description": (
+            "A comma-separated list of flows to include in the snapshot "
+            "description. Defaults to the task's calling flow."
+        ),
+    },
+    "is_packaged": {
+        "description": (
+            "Whether the snapshot is for a packaged build. Use None to "
+            "not use the 'U' or 'P' suffix to signify unpackaged or "
+            "packaged in the name. If True, uses 'P' as a suffix. If "
+            "False, uses 'U' as as suffix. Defaults to None.",
+        ),
+    },
+    "wait": {
+        "description": (
+            "Whether to wait for the snapshot creation to complete. ",
+            "Defaults to True. If False, the task will return immediately ",
+            "after creating the snapshot. Use for running in a split ",
+            "workflow on GitHub. Looks for the GITHUB_OUTPUT environment ",
+            "variable and outputs SNAPSHOT_ID=<id> to it if found for use ",
+            "in later steps.",
+        ),
+    },
+    "snapshot_id": {
+        "description": (
+            "The ID of the in-progress snapshot to wait for completion. "
+            "If set, the task will wait for the snapshot to complete and "
+            "update the existing snapshot with the new details. Use for "
+            "the second step of a split workflow on GitHub.",
+        ),
+    },
+    "pull_request": {
+        "description": (
+            "The GitHub pull request number. If set, generated snapshot "
+            "names will include the PR number and the snapshot description "
+            "will contain pr:<number>."
+        ),
+    },
+}
+base_create_scratch_org_snapshot_options_with_name = {
+    "snapshot_name": {
+        "description": "Name of the snapshot to create",
+        "required": True,
+    },
+    **base_create_scratch_org_snapshot_options,
+}
 
 
-class DevHubOrgConfig(BaseModel):
-    access_token: str = Field(..., description="Access token for the Dev Hub org")
-    instance_url: str = Field(..., description="Instance URL for the Dev Hub org")
+class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
+    """Base class for tasks that create Scratch Org Snapshots."""
 
-
-class BaseDevhubTask(BaseSalesforceTask):
-    """Base class for tasks that need DevHub access."""
-
-    def _init_task(self):
-        """Initialize the task and authenticate to DevHub."""
-        super()._init_task()
-        self.devhub = self._get_devhub_api()
-
-    def _get_devhub_api(self, base_url=None):
-        self.logger.info("Getting Dev Hub access token")
-        p = sfdx(
-            "config get target-dev-hub --json",
-        )
-        try:
-            result = p.stdout_text.read()
-            data = json.loads(result)
-            devhub_username = data["result"][0]["value"]
-        except json.JSONDecodeError:
-            raise SnapshotError(f"Failed to parse SFDX output: {p.stdout_text.read()}")
-        except KeyError:
-            raise SnapshotError(
-                f"Failed to get Dev Hub username from sfdx. Please use `sfdx force:config:set target-dev-hub=<username>` to set the target Dev Hub org."
-            )
-
-        p = sfdx(
-            f"force:org:display --json",
-            username=devhub_username,
-            log_note="Getting Dev Hub org info",
-        )
-
-        try:
-            devhub_info = json.loads(p.stdout_text.read())
-        except json.JSONDecodeError:
-            raise SnapshotError(f"Failed to parse SFDX output: {p.stdout_text.read()}")
-
-        if "result" not in devhub_info:
-            raise SnapshotError(
-                f"Failed to get Dev Hub information from sfdx: {devhub_info}"
-            )
-        devhub = DevHubOrgConfig(
-            access_token=devhub_info["result"]["accessToken"],
-            instance_url=devhub_info["result"]["instanceUrl"],
-        )
-        return get_simple_salesforce_connection(
-            project_config=self.project_config,
-            org_config=devhub,
-            api_version=self.api_version,
-            base_url=base_url,
-        )
-
-
-class CreateScratchOrgSnapshot(BaseSalesforceTask):
-    task_docs = """
-    Creates a Scratch Org Snapshot using the Dev Hub org.
-   
-    **Requires** *`target-dev-hub` configured globally or for the project, used as the target Dev Hub org for Scratch Org Snapshots*.
-    
-    Interacts directly with the OrgSnapshot object in the Salesforce API to fully automate the process of maintaining one active snapshot per snapshot name.
-    
-    *Snapshot Creation Process*
-    
-    - **Check for an existing `active` OrgSnapshot** with the same name and recording its ID
-    - **Check for an existing `in-progress` OrgSnapshot** with the same name and delete it, maintaining only one in-progress snapshot build
-    - **Create a temporary snapshot** under a temporary name with the provided description
-    - **Poll for completion** of the snapshot creation process
-    
-    *On Successful OrgSnapshot Completion*
-    
-    - Delete the existing snapshot
-    - Rename the snapshot to the desired name
-    - Report the snapshot details including the ID, status, and expiration date
-   
-
-    """
-
-    temp_snapshot_suffix = "0"
-
-    task_options = {
-        "snapshot_name": {
-            "description": "Name of the snapshot to create",
-            "required": True,
-        },
-        "description": {
-            "description": "Description of the snapshot",
-            "required": False,
-        },
-    }
-    # Peg to API Version 60.0 for OrgSnapshot object
-    api_version = "60.0"
-    salesforce_task = True
+    task_options = base_create_scratch_org_snapshot_options
 
     def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.current_snapshot_id = None
         self.temp_snapshot_name = None
-        self.sf = None
+        self.devhub = None
         self.snapshot_id = None
         self.start_time = None
-        super().__init__(*args, **kwargs)
 
     def _init_task(self):
-        self.sf = self._get_devhub_api()
-
-    def _init_options(self, kwargs):
-        super()._init_options(kwargs)
-        max_length = 15 - len(self.temp_snapshot_suffix)
-        if len(self.options["snapshot_name"]) > max_length:
-            raise SnapshotError(
-                f"Snapshot name must be {max_length} characters or less"
-            )
-        self.temp_snapshot_name = (
-            f"{self.options['snapshot_name']}{self.temp_snapshot_suffix}"
-        )
+        self.devhub = self._get_devhub_api()
         self.console = Console()
 
-    def _run_task(self):
-        self.logger.info("Starting scratch org snapshot creation")
-        self._check_existing_snapshot()
-        self._create_snapshot()
-        self._poll()
-        self._rename_snapshot()
-        self._report_result()
-
-    def _get_devhub_api(self, base_url=None):
-        self.logger.info("Getting Dev Hub access token")
-        p = sfdx(
-            "config get target-dev-hub --json",
-        )
-        try:
-            devhub_username = json.loads(p.stdout_text.read())["result"][0]["value"]
-        except json.JSONDecodeError:
-            raise SnapshotError(f"Failed to parse SFDX output: {p.stdout_text.read()}")
-        except KeyError:
-            raise SnapshotError(
-                f"Failed to get Dev Hub username from sfdx: {p.stdout_text.read()}"
-            )
-
-        p = sfdx(
-            f"force:org:display --json",
-            username=devhub_username,
-            log_note="Getting Dev Hub org info",
-        )
-
-        try:
-            devhub_info = json.loads(p.stdout_text.read())
-        except json.JSONDecodeError:
-            raise SnapshotError(f"Failed to parse SFDX output: {p.stdout_text.read()}")
-
-        if "result" not in devhub_info:
-            raise SnapshotError(
-                f"Failed to get Dev Hub information from sfdx: {devhub_info}"
-            )
-        devhub = DevHubOrgConfig(
-            access_token=devhub_info["result"]["accessToken"],
-            instance_url=devhub_info["result"]["instanceUrl"],
-        )
-        return get_simple_salesforce_connection(
-            project_config=self.project_config,
-            org_config=devhub,
-            api_version=self.api_version,
-            base_url=base_url,
-        )
-
-    def _check_existing_snapshot(self):
-        query = f"SELECT Id, Status FROM OrgSnapshot WHERE SnapshotName = '{self.options['snapshot_name']}'"
-        result = self.sf.query(query)
-        if result["totalSize"] > 0:
-            snapshot = result["records"][0]
-            if snapshot["Status"] == "In Progress":
-                raise SnapshotError(
-                    f"Snapshot '{self.options['snapshot_name']}' is already being created."
-                )
-            else:
-                self.current_snapshot_id = snapshot["Id"]
-                self.logger.info(
-                    f"Found existing snapshot '{self.options['snapshot_name']}' with id {self.current_snapshot_id}"
-                )
-        query = f"SELECT Id FROM OrgSnapshot WHERE SnapshotName = '{self.temp_snapshot_name}'"
-        result = self.sf.query(query)
-        if result["totalSize"] > 0:
-            snapshot = result["records"][0]
-            self.logger.info(
-                f"Deleting in-progress snapshot '{self.temp_snapshot_name}'"
-            )
-            self.sf.OrgSnapshot.delete(snapshot["Id"])
-
-    def _create_snapshot(self):
-        self.logger.info(
-            f"Creating snapshot: {self.options['snapshot_name']} as {self.temp_snapshot_name}"
-        )
-        try:
-
-            snapshot = self.sf.OrgSnapshot.create(
-                {
-                    "SnapshotName": self.temp_snapshot_name,
-                    "Description": self.options["description"],
-                    "SourceOrg": self.org_config.org_id,
-                    "Content": "metadatadata",
-                }
-            )
-            self.snapshot_id = snapshot["id"]
-            self.start_time = time.time()
-        except SalesforceException as e:
-            if "NOT_FOUND" in str(e):
-                raise SnapshotError(
-                    "Org snapshot feature is not enabled for this Dev Hub."
-                ) from e
-            raise
-
-    def _rename_snapshot(self):
-        if self.current_snapshot_id:
-            self.logger.info(
-                f"Deleting existing snapshot '{self.options['snapshot_name']}'"
-            )
-            self.sf.OrgSnapshot.delete(self.current_snapshot_id)
-        self.logger.info(f"Renaming snapshot to '{self.options['snapshot_name']}'")
-        self.sf.OrgSnapshot.update(
-            self.snapshot_id, {"SnapshotName": self.options["snapshot_name"]}
-        )
-        self.logger.info(f"Snapshot renamed to '{self.options['snapshot_name']}'")
-
-    def _poll_action(self):
-        try:
-            snapshot = self.sf.OrgSnapshot.get(self.snapshot_id)
-        except SalesforceResourceNotFound as exc:
-            raise SnapshotError(
-                "Snapshot not found. This usually happens because another build deleted the while it was being built snapshot."
-            ) from exc
-        status = snapshot["Status"]
-        self.logger.info(f"Snapshot status: {status}")
-        if status == "Active":
-            self.poll_complete = True
-        elif status == "Error":
-            raise SnapshotError(
-                f"Snapshot creation failed: {snapshot.get('Error', 'Unknown error')}"
-            )
-
-    def _poll_update_interval(self):
-        super()._poll_update_interval()
-        if self.poll_interval_s > 30:
-            self.poll_interval_s = 30
-
-    def _report_result(self):
-        result = self.sf.query(
-            f"SELECT {','.join(ORG_SNAPSHOT_FIELDS)} FROM OrgSnapshot WHERE Id = '{self.snapshot_id}'"
-        )
-        snapshot = result["records"][0]
-        self._print_snapshot_details(snapshot)
-
-        end_time = time.time()
-        duration = end_time - self.start_time
-        duration_minutes = int(duration // 60)
-        duration_seconds = int(duration % 60)
-        duration_str = f"{duration_minutes}m and {duration_seconds}s"
-        self.logger.info(f"Snapshot created in {duration_str}")
-
-        # Output to GitHub Actions Job Summary
-        summary_file = os.getenv("GITHUB_STEP_SUMMARY")
-        if summary_file:
-            with open(summary_file, "a") as f:
-                f.write(f"## Snapshot Creation Summary\n")
-                f.write(f"- **Duration**: {duration_str}\n")
-                f.write(f"- **Snapshot ID**: {self.snapshot_id}\n")
-                f.write(f"- **Fields**: {', '.join(ORG_SNAPSHOT_FIELDS)}\n")
-                f.write("\n### Snapshot Details\n")
-                for field in ORG_SNAPSHOT_FIELDS:
-                    if field in snapshot:
-                        value = snapshot[field]
-                        if field in ["CreatedDate", "LastModifiedDate"]:
-                            value = self._format_datetime(value)
-                        elif field == "ExpirationDate":
-                            value = self._format_date(value)
-                        f.write(f"- **{field}**: {value}\n")
-
-    def _print_snapshot_details(self, snapshot):
-        table = Table(title="Snapshot Details")
-        table.add_column("Field", style="cyan")
-        table.add_column("Value", style="magenta")
-
-        for field in ORG_SNAPSHOT_FIELDS:
-            if field in snapshot:
-                value = snapshot[field]
-                if field in ["CreatedDate", "LastModifiedDate"]:
-                    value = self._format_datetime(value)
-                elif field == "ExpirationDate":
-                    value = self._format_date(value)
-                table.add_row(field, str(value))
-
-        self.console.print(table)
-
-    def _format_datetime(self, date_string):
-        if date_string is None:
-            return "N/A"
-        dt = parse(date_string)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
-
-    def _format_date(self, date_string):
-        if date_string is None:
-            return "N/A"
-        return datetime.strptime(date_string, "%Y-%m-%d").strftime("%Y-%m-%d")
-
-
-class GithubPullRequestSnapshot(BaseGithubTask, BaseDevhubTask):
-    task_docs = """
-    Creates a Scratch Org Snapshot for a GitHub Pull Request based on build status and conditions.
-    """
-
-    task_options = {
-        "wait": {
-            "description": "Whether to wait for the snapshot creation to complete. Defaults to True. If False, the task will return immediately after creating the snapshot. Use for running in a split workflow on GitHub. Looks for the GITHUB_OUTPUT environment variable and outputs SNAPSHOT_ID=<id> to it if found for use in later steps.",
-        },
-        "snapshot_id": {
-            "description": "The ID of the in-progress snapshot to wait for completion. If set, the task will wait for the snapshot to complete and update the existing snapshot with the new details. Use for the second step of a split workflow on GitHub.",
-        },
-        "project_code": {"description": "Two-character project code", "required": True},
-        "base_branch": {
-            "description": "Base branch for the pull request. Defaults to the default branch",
-            "required": False,
-        },
-        "build_success": {
-            "description": "Set to True if the build was successful or False for a failure. Defaults to True.",
-            "required": True,
-        },
-        "build_fail_tests": {
-            "description": "Whether the build failed due to test failures. Defaults to False",
-            "required": True,
-        },
-        "commit_status_context": {
-            "description": "The context for the commit status check containing the snapshot name. If unset, no commit status is created.",
-            "required": False,
-        },
-        "snapshot_is_packaged": {
-            "description": "Set to True if the snapshot is for a packaged build or False for unpackaged build",
-            "required": True,
-        },
-        "snapshot_pr": {
-            "description": "Whether to create a snapshot for feature branches with PRs",
-            "required": False,
-        },
-        "snapshot_pr_label": {
-            "description": "Limit snapshot creation to only PRs with this label",
-            "required": False,
-        },
-        "snapshot_pr_draft": {
-            "description": "Whether to create snapshots for draft PRs",
-            "required": False,
-        },
-        "snapshot_fail_pr": {
-            "description": "Whether to create snapshots for failed builds on branches with an open PR",
-            "required": False,
-        },
-        "snapshot_fail_pr_label": {
-            "description": "Limit failure snapshot creation to only PRs with this label",
-            "required": False,
-        },
-        "snapshot_fail_pr_draft": {
-            "description": "Whether to create snapshots for failed draft PR builds",
-            "required": False,
-        },
-        "snapshot_fail_test_only": {
-            "description": "Whether to create snapshots only for test failures",
-            "required": False,
-        },
-        "github_environment_prefix": {
-            "description": "If set, a GitHub Environment will be created for active snapshots using this prefix in the Environment name. If unset, no environment is created.",
-            "required": False,
-        },
-    }
-    api_version = "60.0"
-    salesforce_task = True
-
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
-        self.options["build_success"] = process_bool_arg(
-            self.options.get("build_success", True)
-        )
-        self.options["build_fail_tests"] = process_bool_arg(
-            self.options.get("build_fail_tests")
-        )
-        self.options["commit_status_context"] = self.options.get(
-            "commit_status_context"
+        self.options["flows"] = process_list_arg(
+            self.options.get("flows", self.flow.name)
         )
         self.options["wait"] = process_bool_arg(self.options.get("wait", True))
         self.options["snapshot_id"] = self.options.get("snapshot_id")
-        self.options["snapshot_is_packaged"] = process_bool_arg(
-            self.options.get("snapshot_is_packaged")
-        )
-        self.options["snapshot_pr"] = process_bool_arg(
-            self.options.get("snapshot_pr", True)
-        )
-        self.options["snapshot_pr_draft"] = process_bool_arg(
-            self.options.get("snapshot_pr_draft", False)
-        )
-        self.options["snapshot_fail_pr"] = process_bool_arg(
-            self.options.get("snapshot_fail_pr", True)
-        )
-        self.options["snapshot_fail_pr_draft"] = process_bool_arg(
-            self.options.get("snapshot_fail_pr_draft", False)
-        )
-        self.options["snapshot_fail_test_only"] = process_bool_arg(
-            self.options.get("snapshot_fail_test_only", False)
-        )
-        self.options["snapshot_pr_label"] = self.options.get("snapshot_pr_label")
-        self.options["snapshot_fail_pr_label"] = self.options.get(
-            "snapshot_fail_pr_label"
-        )
-        self.options["base_branch"] = self.options.get(
-            "base_branch", self.project_config.project__git__default_branch
-        )
-        self.options["github_environment_prefix"] = self.options.get(
-            "github_environment_prefix"
-        )
-
-        self.console = Console()
-
-    def _init_task(self):
-        super()._init_task()
-        self.repo = self.get_repo()
+        if self.options.get("snapshot_name"):
+            self._validate_snapshot_name(self.options["snapshot_name"])
+            self._set_temp_snapshot_name(self.options["snapshot_name"])
+        else:
+            self.options["snapshot_name"] = None
+        self.options["org"] = self.options.get("org", self.org_config.name)
+        self.description = {
+            "pr": None,
+            "org": self.org_config.name if self.org_config else None,
+            "commit": (
+                self.project_config.repo_commit[:7]
+                if self.project_config.repo_commit
+                else None
+            ),
+            "branch": self.project_config.repo_branch,
+            "flows": ",".join(self.options["flows"]),
+        }
 
     def _run_task(self):
-        pr = self._get_pull_request()
+        skip_reason = self._should_create_snapshot()
+        if skip_reason:
+            self.logger.info(f"Skipping snapshot creation: {skip_reason}")
+            return
 
-        if self._should_create_snapshot(pr):
-            snapshot_name = self._generate_snapshot_name(pr)
-            description = self._generate_snapshot_description(pr)
+        self.logger.info("Starting scratch org snapshot creation")
+        snapshot_name = self._generate_snapshot_name()
+        description = self._generate_snapshot_description()
 
-            snapshot_manager = SnapshotManager(self.devhub, self.logger)
-            try:
-                if self.options["snapshot_id"]:
-                    snapshot = snapshot_manager.finalize_temp_snapshot(
-                        snapshot_name=snapshot_name,
-                        description=description,
-                        snapshot_id=self.options["snapshot_id"],
-                    )
-                else:
-                    snapshot = snapshot_manager.update_snapshot_from_org(
-                        base_name=snapshot_name,
-                        description=description,
-                        source_org=self.org_config.org_id,
-                        wait=self.options["wait"],
-                    )
-            except SnapshotError as e:
-                self.console.print(
-                    Panel(
-                        f"Failed to create snapshot: {str(e)}",
-                        title="Snapshot Creation",
-                        border_style="red",
-                    )
+        snapshot_manager = SnapshotManager(self.devhub, self.logger)
+        try:
+            if self.options["snapshot_id"]:
+                snapshot = snapshot_manager.finalize_temp_snapshot(
+                    snapshot_name=snapshot_name,
+                    description=description,
+                    snapshot_id=self.options["snapshot_id"],
                 )
-                if self.options["commit_status_context"]:
-                    self._create_commit_status(snapshot_name, "error")
-                raise
-
-            self.return_values["snapshot_id"] = snapshot.get("Id")
-            self.return_values["snapshot_name"] = snapshot.get("SnapshotName")
-            self.return_values["snapshot_description"] = snapshot.get("Description")
-            self.return_values["snapshot_status"] = snapshot.get("Status")
-
-            self._report_result(snapshot)
-            if self.options["wait"] is False:
-                if os.getenv("GITHUB_OUTPUT"):
-                    with open(os.getenv("GITHUB_OUTPUT"), "w") as f:
-                        f.write(f"SNAPSHOT_ID={snapshot['Id']}")
-                        return True
-
+            else:
+                snapshot = snapshot_manager.update_snapshot_from_org(
+                    base_name=snapshot_name,
+                    description=description,
+                    source_org=self.org_config.org_id,
+                    wait=self.options["wait"],
+                )
+        except ScratchOrgSnapshotError as e:
+            self.console.print(
+                Panel(
+                    f"Failed to create snapshot: {str(e)}",
+                    title="Snapshot Creation",
+                    border_style="red",
+                )
+            )
             if self.options["commit_status_context"]:
-                active = self.return_values["snapshot_status"] == "Active"
-                self._create_commit_status(
-                    snapshot_name=(
-                        snapshot_name
-                        if active
-                        else f"{snapshot_name} ({self.return_values['snapshot_status']})"
-                    ),
-                    state="success" if active else "error",
-                )
-            if self.options["github_environment_prefix"]:
-                self._create_github_environment(snapshot_name)
+                self._create_commit_status(snapshot_name, "error")
+            raise
+
+        self.return_values["snapshot_id"] = snapshot.get("Id")
+        self.return_values["snapshot_name"] = snapshot.get("SnapshotName")
+        self.return_values["snapshot_description"] = snapshot.get("Description")
+        self.return_values["snapshot_status"] = snapshot.get("Status")
+
+        self._report_result(snapshot)
+        if self.options["wait"] is False:
+            if os.getenv("GITHUB_OUTPUT"):
+                with open(os.getenv("GITHUB_OUTPUT"), "w") as f:
+                    f.write(f"SNAPSHOT_ID={snapshot['Id']}")
+                    return True
+
+        if self.options["commit_status_context"]:
+            active = self.return_values["snapshot_status"] == "Active"
+            self._create_commit_status(
+                snapshot_name=(
+                    snapshot_name
+                    if active
+                    else f"{snapshot_name} ({self.return_values['snapshot_status']})"
+                ),
+                state="success" if active else "error",
+            )
+        if self.options["github_environment_prefix"]:
+            self._create_github_environment(snapshot_name)
 
         else:
             if self.options.get("snapshot_id"):
@@ -809,126 +464,71 @@ class GithubPullRequestSnapshot(BaseGithubTask, BaseDevhubTask):
                 )
             )
 
-    def _get_pull_request(self):
-        res = self.repo.pull_requests()
-        for pr in res:
-            # For some reason, github3.py or the GitHub API is returning non-matching PRs
-            # This is a workaround to ensure we get the correct PR
-            self.logger.info(
-                f"Checking PR: {pr.number} [{pr.state}] {pr.head.ref} -> {pr.base.ref}"
+    def _should_create_snapshot(self):
+        return True
+
+    def _lookup_pull_request(self):
+        if self.options.get("pull_request"):
+            return self.options["pull_request"]
+
+    def _validate_snapshot_name(self, snapshot_name):
+        try:
+            SnapshotNameValidator(base_name=snapshot_name)
+        except ValueError as e:
+            raise ScratchOrgSnapshotError(str(e)) from e
+
+    def _generate_snapshot_name(self, name: Optional[str] = None):
+        # Try snapshot_name option
+        if not name:
+            name = self.options["snapshot_name"]
+        # Try branch
+        if not name:
+            branch = self.project_config.repo_branch
+            if branch:
+                if branch == self.project_config.project__git__default_branch:
+                    name = branch
+                elif branch.startswith(
+                    self.project_config.project__git__prefix_feature
+                ):
+                    name = f"f{branch[len(self.project_config.project__git__prefix_feature) :]}"
+        # Try commit
+        if not name:
+            commit = self.project_config.repo_commit
+            if commit:
+                name = commit[:7]
+
+        project_code = self.project_config.project_code
+        packaged_code = ""
+        if self.options["is_packaged"] is True:
+            packaged_code = "P"
+        elif self.options["is_packaged"] is False:
+            packaged_code = "U"
+        name = f"{project_code}{name}{packaged_code}"
+        self._validate_snapshot_name(name)
+        return name
+
+    def _set_temp_snapshot_name(self, name: str):
+        name = f"{name}{self.temp_snapshot_suffix}"
+        self._validate_snapshot_name(name)
+        self.temp_snapshot_name = name
+        return self.temp_snapshot_name
+
+    def _generate_snapshot_description(self, pr_number: Optional[int] = None):
+        return (
+            " ".join([f"{k}: {v}" for k, v in self.description.items() if v])
+        ).strip()[:255]
+
+    def _parse_snapshot_description(self, description: str):
+        return dict(item.split(": ") for item in description.split(" ") if ": " in item)
+
+    def _check_snapshot_description(self, description):
+        if isinstance(description, str):
+            description = self._parse_snapshot_description(description)
+        if description != self.description:
+            raise ScratchOrgSnapshotFailure(
+                f"Snapshot description does not match expected description.\n\n"
+                f"Expected: {yaml.dumps(self.description)}\n\nActual: {yaml.dumps(description)}"
             )
-            if (
-                pr.state == "open"
-                and pr.head.ref == self.project_config.repo_branch
-                and pr.base.ref == self.options["base_branch"]
-            ):
-                return pr
-
-    def _should_create_snapshot(self, pr):
-        is_pr = pr is not None
-        self.return_values["has_pr"] = is_pr
-        is_draft = pr.draft if is_pr else False
-        self.return_values["pr_is_draft"] = is_draft
-        pr_labels = [label["name"] for label in pr.labels] if is_pr else []
-        has_snapshot_label = self.options["snapshot_pr_label"] in pr_labels
-        has_snapshot_fail_label = self.options["snapshot_fail_pr_label"] in pr_labels
-        self.return_values["pr_has_snapshot_label"] = has_snapshot_label
-        self.return_values["pr_has_snapshot_fail_label"] = has_snapshot_fail_label
-
-        if self.options["build_success"] is True:
-            if not self.options["snapshot_pr"]:
-                self.return_values["skip_reason"] = "snapshot_pr is False"
-                return False
-            elif not is_pr:
-                self.return_values["skip_reason"] = "No pull request on the branch"
-                return False
-            elif self.options["snapshot_pr_label"] and not has_snapshot_label:
-                self.return_values["skip_reason"] = (
-                    "Pull request does not have snapshot label"
-                )
-                return False
-            elif is_draft and not self.options["snapshot_pr_draft"]:
-                self.return_values["skip_reason"] = (
-                    "Pull request is draft and snapshot_pr_draft is False"
-                )
-                return False
-            return True
-        else:
-            if is_pr:
-                return (
-                    self.options["snapshot_fail_pr"]
-                    and (not is_draft or self.options["snapshot_fail_pr_draft"])
-                    and (
-                        not self.options["snapshot_fail_pr_label"]
-                        or has_snapshot_fail_label
-                    )
-                    and (
-                        not self.options["snapshot_fail_test_only"]
-                        or not self.options["build_fail_tests"]
-                    )
-                )
-            else:
-                return True
-
-    def _generate_snapshot_name(self, pr):
-        project_code = self.options["project_code"]
-        pr_number = pr.number if pr else "NoPR"
-
-        if self.options["build_success"] is True:
-            return f"{project_code}Pr{pr_number}M"
-        else:
-            if self.options["snapshot_fail_test_only"]:
-                return f"{project_code}FTest{pr_number}M"
-            else:
-                return f"{project_code}Fail{pr_number}M"
-
-    def _generate_snapshot_description(self, pr):
-        if self.options["build_success"] is True:
-            return f"Snapshot for PR #{pr.number}: {pr.title} of branch {self.project_config.repo_branch} for commit {self.project_config.repo_commit}"
-        else:
-            return f"Snapshot for failed build on PR #{pr.number}: {pr.title} of branch {self.project_config.repo_branch} for commit {self.project_config.repo_commit}"
-
-    def _report_result(self, snapshot):
-        table = Table(title="Snapshot Details", border_style="cyan")
-        table.add_column("Field", style="cyan")
-        table.add_column("Value", style="magenta")
-
-        for field in [
-            "Id",
-            "SnapshotName",
-            "Status",
-            "Description",
-            "CreatedDate",
-            "ExpirationDate",
-        ]:
-            value = snapshot.get(field, "N/A")
-            if field in ["CreatedDate", "ExpirationDate"]:
-                value = self._format_datetime(value)
-            table.add_row(field, str(value))
-
-        self.console.print(table)
-
-        # Output to GitHub Actions Job Summary
-        summary_file = os.getenv("GITHUB_STEP_SUMMARY")
-        if summary_file:
-            with open(summary_file, "a") as f:
-                f.write(f"## Snapshot Creation Summary\n")
-                f.write(f"- **Snapshot ID**: {snapshot.get('Id')}\n")
-                f.write(f"- **Snapshot Name**: {snapshot.get('SnapshotName')}\n")
-                f.write(f"- **Status**: {snapshot.get('Status')}\n")
-                f.write(f"- **Description**: {snapshot.get('Description')}\n")
-                f.write(
-                    f"- **Created Date**: {self._format_datetime(snapshot.get('CreatedDate'))}\n"
-                )
-                f.write(
-                    f"- **Expiration Date**: {self._format_datetime(snapshot.get('ExpirationDate'))}\n"
-                )
-
-    def _format_datetime(self, date_string):
-        if date_string is None:
-            return "N/A"
-        dt = parse(date_string)
-        return dt.strftime("%Y-%m-%d %H:%M:%S")
 
     def _create_commit_status(self, snapshot_name, state):
         try:
@@ -988,3 +588,264 @@ class GithubPullRequestSnapshot(BaseGithubTask, BaseDevhubTask):
                 )
             )
             raise
+    def _report_result(self, snapshot, extra: Optional[Dict[str, str]] = None):
+        table = Table(title="Snapshot Details", border_style="cyan")
+        table.add_column("Field", style="cyan")
+        table.add_column("Value", style="magenta")
+
+        for field in [
+            "Id",
+            "SnapshotName",
+            "Status",
+            "Description",
+            "CreatedDate",
+            "ExpirationDate",
+        ]:
+            value = snapshot.get(field, "N/A")
+            if field in ["CreatedDate", "ExpirationDate"]:
+                value = self._format_datetime(value)
+            table.add_row(field, str(value))
+
+        self.console.print(table)
+
+        # Output to GitHub Actions Job Summary
+        summary_file = os.getenv("GITHUB_STEP_SUMMARY")
+        if summary_file:
+            with open(summary_file, "a") as f:
+                f.write(f"## Snapshot Creation Summary\n")
+                f.write(f"- **Snapshot ID**: {snapshot.get('Id')}\n")
+                f.write(f"- **Snapshot Name**: {snapshot.get('SnapshotName')}\n")
+                f.write(f"- **Status**: {snapshot.get('Status')}\n")
+                f.write(f"- **Description**: {snapshot.get('Description')}\n")
+                f.write(
+                    f"- **Created Date**: {self._format_datetime(snapshot.get('CreatedDate'))}\n"
+                )
+                f.write(
+                    f"- **Expiration Date**: {self._format_datetime(snapshot.get('ExpirationDate'))}\n"
+                )
+                for key, value in (extra or {}).items():
+                    f.write(f"- **{key}**: {value}\n")
+
+    def _format_datetime(self, date_string):
+        if date_string is None:
+            return "N/A"
+        dt = parse(date_string)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    def _format_date(self, date_string):
+        if date_string is None:
+            return "N/A"
+        dt = parse(date_string)
+        return dt.strftime("%Y-%m-%d")
+
+
+class CreateScratchOrgSnapshot(BaseSalesforceTask):
+    task_docs = """
+    Creates a Scratch Org Snapshot using the Dev Hub org.
+   
+    **Requires** *`target-dev-hub` configured globally or for the project, used as the target Dev Hub org for Scratch Org Snapshots*.
+    
+    Interacts directly with the OrgSnapshot object in the Salesforce API to fully automate the process of maintaining one active snapshot per snapshot name.
+    
+    *Snapshot Creation Process*
+    
+    - **Check for an existing `active` OrgSnapshot** with the same name and recording its ID
+    - **Check for an existing `in-progress` OrgSnapshot** with the same name and delete it, maintaining only one in-progress snapshot build
+    - **Create a temporary snapshot** under a temporary name with the provided description
+    - **Poll for completion** of the snapshot creation process
+        - Or pass `--wait False` to return immediately after creating the snapshot setting SNAPSHOT_ID=<id> in GITHUB_OUTPUT and reporting the snapshot details
+    
+    *On Successful OrgSnapshot Completion*
+    
+    - Delete the existing snapshot
+    - Rename the snapshot to the desired name
+    - Report the snapshot details including the ID, status, and expiration date
+    """
+
+    temp_snapshot_suffix = "0"
+
+    task_options = base_create_scratch_org_snapshot_options_with_name
+
+    # Peg to API Version 60.0 for OrgSnapshot object
+    api_version = "60.0"
+    salesforce_task = True
+
+    def _init_options(self, kwargs):
+        super()._init_options(kwargs)
+        self.temp_snapshot_name = (
+            f"{self.options['snapshot_name']}{self.temp_snapshot_suffix}"
+        )
+        self.options["description"] = self.options.get("description")
+
+
+class GithubPullRequestSnapshot(BaseGithubTask, BaseDevhubTask):
+    task_docs = """
+    Creates a Scratch Org Snapshot for a GitHub Pull Request based on build status and conditions.
+    """
+
+    task_options = {
+        "build_success": {
+            "description": "Set to True if the build was successful or False for a failure. Defaults to True.",
+            "required": True,
+        },
+        "build_fail_tests": {
+            "description": "Whether the build failed due to test failures. Defaults to False",
+            "required": True,
+        },
+        "snapshot_pr": {
+            "description": "Whether to create a snapshot for feature branches with PRs",
+            "required": False,
+        },
+        "snapshot_pr_label": {
+            "description": "Limit snapshot creation to only PRs with this label",
+            "required": False,
+        },
+        "snapshot_pr_draft": {
+            "description": "Whether to create snapshots for draft PRs",
+            "required": False,
+        },
+        "snapshot_fail_pr": {
+            "description": "Whether to create snapshots for failed builds on branches with an open PR",
+            "required": False,
+        },
+        "snapshot_fail_pr_label": {
+            "description": "Limit failure snapshot creation to only PRs with this label",
+            "required": False,
+        },
+        "snapshot_fail_pr_draft": {
+            "description": "Whether to create snapshots for failed draft PR builds",
+            "required": False,
+        },
+        "snapshot_fail_test_only": {
+            "description": "Whether to create snapshots only for test failures",
+            "required": False,
+        },
+        **base_create_scratch_org_snapshot_options,
+    }
+    api_version = "60.0"
+    salesforce_task = True
+    
+    def __init__(self, *args, **kwargs):
+        self.pull_request = None
+        super().__init__(*args, **kwargs)
+
+    def _init_options(self, kwargs):
+        super()._init_options(kwargs)
+        self.options["build_success"] = process_bool_arg(
+            self.options.get("build_success", True)
+        )
+        self.options["build_fail_tests"] = process_bool_arg(
+            self.options.get("build_fail_tests")
+        )
+        self.options["commit_status_context"] = self.options.get(
+            "commit_status_context"
+        )
+        self.options["wait"] = process_bool_arg(self.options.get("wait", True))
+        self.options["snapshot_id"] = self.options.get("snapshot_id")
+        self.options["snapshot_pr"] = process_bool_arg(
+            self.options.get("snapshot_pr", True)
+        )
+        self.options["snapshot_pr_draft"] = process_bool_arg(
+            self.options.get("snapshot_pr_draft", False)
+        )
+        self.options["snapshot_fail_pr"] = process_bool_arg(
+            self.options.get("snapshot_fail_pr", True)
+        )
+        self.options["snapshot_fail_pr_draft"] = process_bool_arg(
+            self.options.get("snapshot_fail_pr_draft", False)
+        )
+        self.options["snapshot_fail_test_only"] = process_bool_arg(
+            self.options.get("snapshot_fail_test_only", False)
+        )
+        self.options["snapshot_pr_label"] = self.options.get("snapshot_pr_label")
+        self.options["snapshot_fail_pr_label"] = self.options.get(
+            "snapshot_fail_pr_label"
+        )
+
+        self.console = Console()
+
+    def _init_task(self):
+        super()._init_task()
+        self.repo = self.get_repo()
+        self.pull_request = self._lookup_pull_request()
+
+    def _lookup_pull_request(self):
+        pr = super()._lookup_pull_request()
+        if pr:
+            res = [self.repo.pull_request(pr)]
+        else:
+            res = self.repo.pull_requests(
+                state = "open",
+                head = f"{self.project_config.repo_owner}:{self.project_config.repo_branch}",
+            )
+        for pr in res:
+            self.logger.info(
+                f"Checking PR: {pr.number} [{pr.state}] {pr.head.ref} -> {pr.base.ref}"
+            )
+            if (
+                pr.state == "open"
+                and pr.head.ref == self.project_config.repo_branch
+            ):
+                self.logger.info(f"Found PR: {pr.number}")
+                return pr
+
+    def _should_create_snapshot(self):
+        is_pr = self.pull_request is not None
+        self.return_values["has_pr"] = is_pr
+        is_draft = self.pull_request.draft if is_pr else False
+        self.return_values["pr_is_draft"] = is_draft
+        pr_labels = [label["name"] for label in self.pull_request.labels] if is_pr else []
+        has_snapshot_label = self.options["snapshot_pr_label"] in pr_labels
+        has_snapshot_fail_label = self.options["snapshot_fail_pr_label"] in pr_labels
+        self.return_values["pr_has_snapshot_label"] = has_snapshot_label
+        self.return_values["pr_has_snapshot_fail_label"] = has_snapshot_fail_label
+
+        if self.options["build_success"] is True:
+            if not self.options["snapshot_pr"]:
+                self.return_values["skip_reason"] = "snapshot_pr is False"
+                return False
+            elif not is_pr:
+                self.return_values["skip_reason"] = "No pull request on the branch"
+                return False
+            elif self.options["snapshot_pr_label"] and not has_snapshot_label:
+                self.return_values["skip_reason"] = (
+                    "Pull request does not have snapshot label"
+                )
+                return False
+            elif is_draft and not self.options["snapshot_pr_draft"]:
+                self.return_values["skip_reason"] = (
+                    "Pull request is draft and snapshot_pr_draft is False"
+                )
+                return False
+            return True
+        else:
+            if is_pr:
+                return (
+                    self.options["snapshot_fail_pr"]
+                    and (not is_draft or self.options["snapshot_fail_pr_draft"])
+                    and (
+                        not self.options["snapshot_fail_pr_label"]
+                        or has_snapshot_fail_label
+                    )
+                    and (
+                        not self.options["snapshot_fail_test_only"]
+                        or not self.options["build_fail_tests"]
+                    )
+                )
+            else:
+                return True
+
+    def _generate_snapshot_name(self, name):
+        pr_number = self.pull_request.number if self.pull_request else None
+        name = "" 
+        name = self.options["snapshot_name"] or name
+        if not name:
+            name = f"Pr{pr_number}" if pr_number else name
+            
+        if self.optionsl["build_success"] is False:
+            if self.options["build_fail_tests"]:
+                name = f"FTest{name}"
+            else:
+                name = f"Fail{name}"
+        return super()._generate_snapshot_name(name)
+                

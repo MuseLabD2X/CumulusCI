@@ -176,7 +176,9 @@ class BaseProjectConfig(BaseTaskFlowConfig, ProjectConfigPropertiesMixin):
                     Path(sys.modules[plugin].__file__).parent / "cumulusci.yml"
                 )
             except Exception as exc:
-                raise ConfigError(f"Could not load plugin {plugin}: {exc}. Please make sure the plugin is installed.")
+                raise ConfigError(
+                    f"Could not load plugin {plugin}: {exc}. Please make sure the plugin is installed."
+                )
             if plugin_config_path.is_file():
                 plugin_config = cci_safe_load(
                     str(plugin_config_path), logger=self.logger
@@ -187,7 +189,6 @@ class BaseProjectConfig(BaseTaskFlowConfig, ProjectConfigPropertiesMixin):
                 self.logger.info(f"Loaded plugin {plugin}")
             else:
                 self.logger.info(f"Loaded plugin {plugin} but no cumulusci.yml found")
-            
 
         # Load the local project yaml config file if it exists
         if self.config_project_local_path:
@@ -208,18 +209,20 @@ class BaseProjectConfig(BaseTaskFlowConfig, ProjectConfigPropertiesMixin):
                 self.config_additional_yaml.update(additional_yaml_config)
 
         merge_stack = {
-                "universal_config": self.config_universal,
-                "global_config": self.config_global,
+            "universal_config": self.config_universal,
+            "global_config": self.config_global,
         }
         if self.config_plugins:
             for plugin, plugin_config in self.config_plugins.items():
                 merge_stack[plugin] = plugin_config
 
-        merge_stack.update({
+        merge_stack.update(
+            {
                 "project_config": self.config_project,
                 "project_local_config": self.config_project_local,
                 "additional_yaml": self.config_additional_yaml,
-        })
+            }
+        )
 
         self.config = merge_config(merge_stack)
 
@@ -245,6 +248,22 @@ class BaseProjectConfig(BaseTaskFlowConfig, ProjectConfigPropertiesMixin):
     @property
     def config_universal(self) -> dict:
         return self.universal_config_obj.config_universal
+
+    @property
+    def project_code(self) -> str:
+        if self.project__code:
+            return self.project__code
+        # Find the first two uppercase letters in the project name
+        # or use the first two two letters of the project name
+        uppers = []
+        for letter in self.project__name:
+            if letter.isupper():
+                uppers.append(letter)
+            if len(uppers) == 2:
+                break
+        if len(uppers) == 2:
+            return "".join(uppers)
+        return self.project__name[:2].upper()
 
     @property
     def repo_info(self) -> Dict[str, Any]:

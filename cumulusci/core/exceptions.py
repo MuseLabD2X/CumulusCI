@@ -224,6 +224,24 @@ class SalesforceDXException(CumulusCIException):
     pass
 
 
+class ScratchOrgSnapshotFailure(CumulusCIFailure):
+    """Raise for failures related to scratch org snapshots"""
+
+    pass
+
+
+class ScratchOrgSnapshotError(CumulusCIFailure):
+    """Raise for errors related to scratch org snapshots"""
+
+    pass
+
+
+class DevhubAuthError(SalesforceDXException):
+    """Raise for errors related to Dev Hub authentication"""
+
+    pass
+
+
 class SOQLQueryException(CumulusCIFailure):
     """Raise for errors related to Salesforce DX"""
 
