@@ -329,11 +329,42 @@ base_create_scratch_org_snapshot_options = {
             "the second step of a split workflow on GitHub.",
         ),
     },
+    "source_org_id": {
+        "description": {
+            "The Salesforce Org ID of the source org to create the snapshot from."
+            "Must be a valid scratch org for snapshots in the default devhub."
+            "Defaults to the org passed to the task or flow."
+        }
+    },
     "pull_request": {
         "description": (
             "The GitHub pull request number. If set, generated snapshot "
             "names will include the PR number and the snapshot description "
             "will contain pr:<number>."
+        ),
+    },
+    "create_commit_status": {
+        "description": (
+            "Whether to create a GitHub commit status for the snapshot. "
+            "Defaults to False."
+        ),
+    },
+    "create_environment": {
+        "description": (
+            "Whether to create a GitHub Environment for the snapshot. "
+            "Defaults to False."
+        ),
+    },
+    "commit_status_context": {
+        "description": (
+            "The GitHub commit status context to use for reporting the "
+            "snapshot status. If set, the task will create a commit status "
+            "with the snapshot status."
+        ),
+    },
+    "environment_prefix": {
+        "description": (
+            "The prefix to use for the GitHub Environment name if create_github_environment is True"
         ),
     },
 }
@@ -362,6 +393,7 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
     def _init_task(self):
         self.devhub = self._get_devhub_api()
         self.console = Console()
+        self.is_github_job = os.getenv("GITHUB_ACTIONS") == "true"
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
@@ -375,7 +407,17 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
             self._set_temp_snapshot_name(self.options["snapshot_name"])
         else:
             self.options["snapshot_name"] = None
-        self.options["org"] = self.options.get("org", self.org_config.name)
+        self.options["source_org_id"] = self.options.get("source_org_id")
+        self.options["pull_request"] = self._lookup_pull_request()
+        self.options["create_commit_status"] = process_bool_arg(
+            self.options.get("create_commit_status", False)
+        )
+        self.options["create_environment"] = process_bool_arg(
+            self.options.get("create_environment", False)
+        )
+        self.options["commit_status_context"] = self.options.get("commit_status_context")
+        self.options["environment_prefix"] = self.options.get("environment_prefix") 
+            
         self.description = {
             "pr": None,
             "org": self.org_config.name if self.org_config else None,
@@ -390,15 +432,27 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
 
     def _run_task(self):
         skip_reason = self._should_create_snapshot()
+        snapshot_manager = SnapshotManager(self.devhub, self.logger)
         if skip_reason:
-            self.logger.info(f"Skipping snapshot creation: {skip_reason}")
+            if skip_reason is not True:
+                self.logger.info(f"Skipping snapshot creation: {skip_reason}")
+                if self.options.get("snapshot_id"):
+                    self.logger.warning(
+                        "In-progress snapshot does not meet conditions for finalization. Deleting..."
+                    )
+                    self.console.print(
+                        Panel(
+                            f"No snapshot creation required based on current conditions. {self.return_values.get('skip_reason','')}",
+                            title="Snapshot Creation",
+                            border_style="yellow",
+                        )
+                    )
             return
 
         self.logger.info("Starting scratch org snapshot creation")
         snapshot_name = self._generate_snapshot_name()
         description = self._generate_snapshot_description()
 
-        snapshot_manager = SnapshotManager(self.devhub, self.logger)
         try:
             if self.options["snapshot_id"]:
                 snapshot = snapshot_manager.finalize_temp_snapshot(
@@ -437,7 +491,7 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
                     f.write(f"SNAPSHOT_ID={snapshot['Id']}")
                     return True
 
-        if self.options["commit_status_context"]:
+        if self.is_github_job and self.options["create_commit_status"]:
             active = self.return_values["snapshot_status"] == "Active"
             self._create_commit_status(
                 snapshot_name=(
@@ -447,22 +501,8 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
                 ),
                 state="success" if active else "error",
             )
-        if self.options["github_environment_prefix"]:
+        if self.is_github_job and self.options["github_environment_prefix"]:
             self._create_github_environment(snapshot_name)
-
-        else:
-            if self.options.get("snapshot_id"):
-                self.logger.warning(
-                    "In-progress snapshot does not meet conditions for finalization. Deleting..."
-                )
-
-            self.console.print(
-                Panel(
-                    f"No snapshot creation required based on current conditions. {self.return_values.get('skip_reason','')}",
-                    title="Snapshot Creation",
-                    border_style="yellow",
-                )
-            )
 
     def _should_create_snapshot(self):
         return True
@@ -496,6 +536,11 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
             commit = self.project_config.repo_commit
             if commit:
                 name = commit[:7]
+                
+        if not name:
+            raise ScratchOrgSnapshotError(
+                "Unable to generate snapshot name. Please provide a snapshot name."
+            )
 
         project_code = self.project_config.project_code
         packaged_code = ""
@@ -503,7 +548,8 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
             packaged_code = "P"
         elif self.options["is_packaged"] is False:
             packaged_code = "U"
-        name = f"{project_code}{name}{packaged_code}"
+        available_length = 14 - len(packaged_code) - len(project_code)
+        name = f"{project_code}{name[:available_length]}{packaged_code}"
         self._validate_snapshot_name(name)
         return name
 
@@ -588,6 +634,7 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
                 )
             )
             raise
+        
     def _report_result(self, snapshot, extra: Optional[Dict[str, str]] = None):
         table = Table(title="Snapshot Details", border_style="cyan")
         table.add_column("Field", style="cyan")
