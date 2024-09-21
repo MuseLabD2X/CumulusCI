@@ -21,6 +21,7 @@ from cumulusci.utils.logging import tee_stdout_stderr
 
 from .error import error
 from .flow import flow
+from .hash import hash_group
 from .logger import get_tempfile_logger, init_logger
 from .org import org
 from .plan import plan
@@ -258,3 +259,4 @@ cli.add_command(task)
 cli.add_command(flow)
 cli.add_command(plan)
 cli.add_command(robot)
+cli.add_command(hash_group)
