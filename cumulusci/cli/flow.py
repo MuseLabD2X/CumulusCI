@@ -1,13 +1,17 @@
 import json
+import os
+import yaml
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 import click
 
+from cumulusci.core.github import set_github_output
 from cumulusci.core.exceptions import FlowNotFoundError
 from cumulusci.core.utils import format_duration
 from cumulusci.utils import document_flow, flow_ref_title_and_intro
+from cumulusci.utils.hashing import hash_dict
 from cumulusci.utils.yaml.safer_loader import load_yaml_data
 
 from .runtime import pass_runtime
@@ -48,9 +52,9 @@ def flow_doc(runtime, project=False, load_yml=None):
     flows_by_group = group_items(flows)
     flow_groups = sorted(
         flows_by_group.keys(),
-        key=lambda group: flow_info_groups.index(group)
-        if group in flow_info_groups
-        else 100,
+        key=lambda group: (
+            flow_info_groups.index(group) if group in flow_info_groups else 100
+        ),
     )
 
     for group in flow_groups:
@@ -115,13 +119,39 @@ def flow_list(runtime, plain, print_json, load_yml=None):
 @flow.command(name="info", help="Displays information for a flow")
 @click.argument("flow_name")
 @click.option(
+    "--skip", help="Specify a comma separated list of task and flow names to skip."
+)
+@click.option(
+    "--skip-from",
+    help="Specify a task or flow name to skip and all steps that follow it.",
+)
+@click.option(
+    "--start-from",
+    help="Specify a task or flow name to start from. All prior steps will be skippped.",
+)
+@click.option(
     "--load-yml",
     help="If set, loads the specified yml file into the the project config as additional config",
 )
 @pass_runtime(require_keychain=True)
-def flow_info(runtime, flow_name, load_yml=None):
+def flow_info(
+    runtime,
+    flow_name,
+    skip=None,
+    skip_from=None,
+    start_from=None,
+    load_yml=None,
+):
+    if skip:
+        skip = skip.split(",")
+
     try:
-        coordinator = runtime.get_flow(flow_name)
+        coordinator = runtime.get_flow(
+            flow_name,
+            skip=skip,
+            skip_from=skip_from,
+            start_from=start_from,
+        )
         output = coordinator.get_summary(verbose=True)
         click.echo(output)
     except FlowNotFoundError as e:
@@ -154,11 +184,38 @@ def flow_info(runtime, flow_name, load_yml=None):
     help="Disables all prompts.  Set for non-interactive mode use such as calling from scripts or CI systems",
 )
 @click.option(
+    "--skip", help="Specify a comma separated list of task and flow names to skip."
+)
+@click.option(
+    "--skip-from",
+    help="Specify a task or flow name to skip and all steps that follow it.",
+)
+@click.option(
+    "--start-from",
+    help="Specify a task or flow name to start from. All prior steps will be skippped.",
+)
+@click.option(
+
     "--load-yml",
     help="If set, loads the specified yml file into the the project config as additional config",
 )
 @pass_runtime(require_keychain=True)
-def flow_run(runtime, flow_name, org, delete_org, debug, o, no_prompt, load_yml=None):
+def flow_run(
+    runtime,
+    flow_name,
+    org,
+    delete_org,
+    debug,
+    o,
+    no_prompt,
+    skip=None,
+    skip_from=None,
+    start_from=None,
+    load_yml=None,
+):
+    if skip:
+        skip = skip.split(",")
+
     # Get necessary configs
     org, org_config = runtime.get_org(org)
     if delete_org and not org_config.scratch:
@@ -178,7 +235,13 @@ def flow_run(runtime, flow_name, org, delete_org, debug, o, no_prompt, load_yml=
 
     # Create the flow and handle initialization exceptions
     try:
-        coordinator = runtime.get_flow(flow_name, options=options)
+        coordinator = runtime.get_flow(
+            flow_name,
+            options=options,
+            skip=skip,
+            skip_from=skip_from,
+            start_from=start_from,
+        )
         start_time = datetime.now()
         coordinator.run(org_config)
         duration = datetime.now() - start_time
@@ -196,5 +259,73 @@ def flow_run(runtime, flow_name, org, delete_org, debug, o, no_prompt, load_yml=
                     "Scratch org deletion failed.  Ignoring the error below to complete the flow:"
                 )
                 click.echo(str(e))
+
+    runtime.alert(f"Flow Complete: {flow_name}")
+
+
+@flow.command(name="freeze", help="Freeze a flow into a flattened list of static steps")
+@click.argument("flow_name")
+@click.option(
+    "--org",
+    help="Specify the target org.  By default, runs against the current default org",
+)
+@click.option(
+    "--debug", is_flag=True, help="Drops into pdb, the Python debugger, on an exception"
+)
+@click.option(
+    "-o",
+    nargs=2,
+    multiple=True,
+    help="Pass task specific options for the task as '-o taskname__option value'.  You can specify more than one option by using -o more than once.",
+)
+@click.option(
+    "--no-prompt",
+    is_flag=True,
+    help="Disables all prompts.  Set for non-interactive mode use such as calling from scripts or CI systems",
+)
+@pass_runtime(require_keychain=True)
+def flow_freeze(runtime, flow_name, org, debug, o, no_prompt=True):
+
+    # Get necessary configs
+    org, org_config = runtime.get_org(org)
+
+    # Parse command line options
+    options = defaultdict(dict)
+    if o:
+        for key, value in o:
+            if "__" in key:
+                task_name, option_name = key.split("__")
+                options[task_name][option_name] = value
+            else:
+                raise click.UsageError(
+                    "-o option for flows should contain __ to split task name from option name."
+                )
+
+    # Create the flow and handle initialization exceptions
+    try:
+        coordinator = runtime.get_flow(flow_name, options=options)
+        start_time = datetime.now()
+        steps = {}
+        for step in coordinator.freeze(org_config):
+            stepnum = len(steps)
+            steps[stepnum] = step
+
+        steps_hash = make_md5_hash(steps)
+        duration = datetime.now() - start_time
+        click.echo(f"Froze {flow_name} in {format_duration(duration)}")
+        frozen_name = f"{flow_name}__{steps_hash}"
+        filename = f"{frozen_name}.yml"
+        frozen_flow = coordinator.flow_config.config
+        frozen_flow["description"] = (
+            f"Frozen version of {flow_name} with hash {steps_hash}"
+        )
+        frozen_flow["steps"] = steps
+        with open(filename, "w") as f:
+            yaml.dump({"flows": {frozen_name: frozen_flow}}, f)
+        set_github_output("FLOW_FILENAME", filename)
+        click.echo(f"Frozen flow saved to {filename}")
+    except Exception:
+        runtime.alert(f"Flow error: {flow_name}")
+        raise
 
     runtime.alert(f"Flow Complete: {flow_name}")
