@@ -1,27 +1,48 @@
 import json
 import os
 import time
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, Literal, List, Optional, Tuple
 import yaml
 from datetime import datetime, timedelta
 from dateutil.parser import parse
+from cumulusci.core.dependencies import (
+    StaticDependency,
+)
 from cumulusci.core.exceptions import (
     SalesforceException,
     ScratchOrgSnapshotError,
     ScratchOrgSnapshotFailure,
 )
+from cumulusci.core.github import set_github_output
 from cumulusci.core.sfdx import sfdx
+
 from cumulusci.core.utils import process_bool_arg, process_list_arg
 from cumulusci.salesforce_api.utils import get_simple_salesforce_connection
 from cumulusci.tasks.salesforce import BaseSalesforceTask
 from cumulusci.tasks.devhub import BaseDevhubTask
 from cumulusci.tasks.github.base import BaseGithubTask
 from cumulusci.utils.hashing import hash_dict
+from cumulusci.utils.options import (
+    CCIOptions,
+    DirectoryPath,
+    FilePath,
+    Field,
+    ListOfStringsOption,
+)
+from cumulusci.utils.yaml.cumulusci_yml import ProjectDependencies
 from github3 import GitHubError
 from pydantic import BaseModel, Field, validator
 from simple_salesforce import Salesforce
 from simple_salesforce.exceptions import SalesforceResourceNotFound
 from rich.console import Console
+from rich.panel import Panel
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TimeElapsedColumn,
+)
 from rich.table import Table
 
 ORG_SNAPSHOT_FIELDS = [
@@ -37,19 +58,6 @@ ORG_SNAPSHOT_FIELDS = [
 ]
 
 
-import time
-from rich.console import Console
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    BarColumn,
-    TimeElapsedColumn,
-)
-from rich.panel import Panel
-from rich.live import Live
-
-
 class SnapshotNameValidator(BaseModel):
     base_name: str = Field(..., max_length=13)
 
@@ -63,7 +71,6 @@ class SnapshotNameValidator(BaseModel):
         if name[0].isdigit():
             raise ValueError("Snapshot name must start with a letter")
         return name
-
 
 class SnapshotManager:
     def __init__(self, devhub, logger):
@@ -295,93 +302,166 @@ class SnapshotManager:
 
 
 
-
-
-base_create_scratch_org_snapshot_options = {
-    "flows": {
-        "description": (
-            "A comma-separated list of flows to include in the snapshot "
-            "description. Defaults to the task's calling flow."
+class BaseCreateScratchOptions(CCIOptions):
+    wait: bool = Field(
+        True,
+        description = (
+            "Whether to wait for the snapshot creation to complete. "
+            "Defaults to True. If False, the task will return immediately "
+            "after creating the snapshot. Use for running in a split "
+            "workflow on GitHub. Looks for the GITHUB_OUTPUT environment "
+            "variable and outputs SNAPSHOT_ID=<id> to it if found for use "
+            "in later steps."
         ),
-    },
-    "is_packaged": {
-        "description": (
-            "Whether the snapshot is for a packaged build. Use None to "
-            "not use the 'U' or 'P' suffix to signify unpackaged or "
-            "packaged in the name. If True, uses 'P' as a suffix. If "
-            "False, uses 'U' as as suffix. Defaults to None.",
-        ),
-    },
-    "wait": {
-        "description": (
-            "Whether to wait for the snapshot creation to complete. ",
-            "Defaults to True. If False, the task will return immediately ",
-            "after creating the snapshot. Use for running in a split ",
-            "workflow on GitHub. Looks for the GITHUB_OUTPUT environment ",
-            "variable and outputs SNAPSHOT_ID=<id> to it if found for use ",
-            "in later steps.",
-        ),
-    },
-    "snapshot_id": {
-        "description": (
+    )
+    snapshot_id: Optional[str] = Field(
+        None,
+        description = (
             "The ID of the in-progress snapshot to wait for completion. "
             "If set, the task will wait for the snapshot to complete and "
             "update the existing snapshot with the new details. Use for "
-            "the second step of a split workflow on GitHub.",
+            "the second step of a split workflow on GitHub."
         ),
-    },
-    "source_org_id": {
-        "description": {
+    )
+    source_org_id: Optional[str] = Field(
+        None,
+        description = (
             "The Salesforce Org ID of the source org to create the snapshot from."
             "Must be a valid scratch org for snapshots in the default devhub."
             "Defaults to the org passed to the task or flow."
-        }
-    },
-    "pull_request": {
-        "description": (
+        ),
+    )
+    
+class HashedValue(BaseModel):
+    key: str = Field(
+        ...,
+        description = "The key of the hashed value.",
+    )
+    hashed: Optional[str] = Field(
+        None,
+        description = "The hashed value, usually generated by `cci hash *` commands or task return_values.",
+    )
+
+class HashedFlow(HashedValue):
+    frozen: Optional[bool] = Field(
+        False,
+        description = "Whether the flow is frozen. Defaults to False.",
+    )
+    yaml: Optional[str] = Field(
+        None,
+        description = "The YAML representation of the flow.",
+    )
+    yaml_path: Optional[FilePath] = Field(
+        None,
+        description = "The path to the YAML file containing the flow.",
+    )
+    
+class HashedDependencies(HashedValue):
+    source_dependencies: Optional[ProjectDependencies] = Field(
+        None,
+        description = "The project dependencies used to generate the hash.",
+    )
+    dependencies: Optional[List[StaticDependency]] = Field(
+        None,
+        description = "The resolved static dependencies used to generate the hash.",
+    )
+    
+    
+class DescriptionHashMixin:
+    flows: Optional[List[HashedFlow]] = Field(
+        None,
+        description = (
+            "A dictionary of flow names and their corresponding hash values. "
+            "If not provided, hashed values will be generated for all listed flows. "
+            "Used to include in the snapshot description."
+        ),
+    )
+    pull_request: Optional[int] = Field(
+        None,
+        description = (
             "The GitHub pull request number. If set, generated snapshot "
             "names will include the PR number and the snapshot description "
             "will contain pr:<number>."
         ),
-    },
-    "create_commit_status": {
-        "description": (
+    )
+    dependencies_hash: Optional[str] = Field(
+        None,
+        description = (
+            "The hash of the project's dependencies deployed to the scratch org "
+            "generated by the `update_dependencies` task or the `cci hash dependencies` command."
+        ),
+    )
+    
+class GithubCommitStatusMixin:
+    create_commit_status: bool = Field(
+        False,
+        description = (
             "Whether to create a GitHub commit status for the snapshot. "
             "Defaults to False."
         ),
-    },
-    "create_environment": {
-        "description": (
-            "Whether to create a GitHub Environment for the snapshot. "
-            "Defaults to False."
-        ),
-    },
-    "commit_status_context": {
-        "description": (
+    )
+    commit_status_context: str = Field(
+        "Snapshot",
+        description = (
             "The GitHub commit status context to use for reporting the "
             "snapshot status. If set, the task will create a commit status "
             "with the snapshot status."
         ),
-    },
-    "environment_prefix": {
-        "description": (
+    )
+    
+class GithubEnvironmentMixin:
+    create_environment: bool = Field(
+        False,
+        description = (
+            "Whether to create a GitHub Environment for the snapshot. "
+            "Defaults to False."
+        ),
+    )
+    environment_prefix: str = Field(
+        "Snapshot-",
+        description = (
             "The prefix to use for the GitHub Environment name if create_github_environment is True"
         ),
-    },
-}
-base_create_scratch_org_snapshot_options_with_name = {
-    "snapshot_name": {
-        "description": "Name of the snapshot to create",
-        "required": True,
-    },
-    **base_create_scratch_org_snapshot_options,
-}
+    )
+    
+class SnapshotNameMixin:
+    snapshot_name: str = Field(
+        ...,
+        description = (
+            "Name of the snapshot to create. Must be a valid snapshot name. "
+            "Max 14 characters, alphanumeric, and start with a letter including product code and packaging suffix."
+        ),
+    )
+
+class NameContextMixin:
+    include_product_code: bool = Field(
+        True,
+        description = (
+            "Whether to include the project code as a prefix in the snapshot name. "
+            "Defaults to True."
+        ),
+    )
+    include_packaging_suffix: bool = Field(
+        True,
+        description = (
+            "Whether to include a packaging suffix in the snapshot name. "
+            "Defaults to True."
+        ),
+    )
+    packaging_suffix: Literal["P","U"] = Field(
+        "P",
+        description = (
+            "The packaging suffix to use in the snapshot name. Defaults to 'P'."
+        ),
+    )
+    
 
 
-class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
+class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
     """Base class for tasks that create Scratch Org Snapshots."""
 
-    task_options = base_create_scratch_org_snapshot_options
+    class Options(BaseCreateScratchOptions):
+        pass
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -398,8 +478,8 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
-        self.options["flows"] = process_list_arg(
-            self.options.get("flows", self.flow.name)
+        self.parsed_options.flows = process_list_arg(
+            self.parsed_options.get("flows", self.flow.name if self.flow else None)
         )
         self.options["wait"] = process_bool_arg(self.options.get("wait", True))
         self.options["snapshot_id"] = self.options.get("snapshot_id")
@@ -428,7 +508,7 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
                 else None
             ),
             "branch": self.project_config.repo_branch,
-            "flows": ",".join(self.options["flows"]),
+            "flows": ",".join(self.options["flows"]) if self.options["flows"] else None,
         }
 
     def _run_task(self):
@@ -486,11 +566,7 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
         self.return_values["snapshot_status"] = snapshot.get("Status")
 
         self._report_result(snapshot)
-        if self.options["wait"] is False:
-            if os.getenv("GITHUB_OUTPUT"):
-                with open(os.getenv("GITHUB_OUTPUT"), "w") as f:
-                    f.write(f"SNAPSHOT_ID={snapshot['Id']}")
-                    return True
+        set_github_output("SNAPSHOT_ID", snapshot['Id'])
 
         if self.is_github_job and self.options["create_commit_status"]:
             active = self.return_values["snapshot_status"] == "Active"
@@ -687,7 +763,8 @@ class BaseCreateScratchOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
         return dt.strftime("%Y-%m-%d")
 
 
-class CreateScratchOrgSnapshot(BaseSalesforceTask):
+class CreateOrgSnapshot(BaseCreateOrgSnapshot):
+    salesforce_task = False
     task_docs = """
     Creates a Scratch Org Snapshot using the Dev Hub org.
    
@@ -712,7 +789,8 @@ class CreateScratchOrgSnapshot(BaseSalesforceTask):
 
     temp_snapshot_suffix = "0"
 
-    task_options = base_create_scratch_org_snapshot_options_with_name
+    class Options(BaseCreateScratchOptions, SnapshotNameMixin, NameContextMixin, DescriptionHashMixin):
+        pass
 
     # Peg to API Version 60.0 for OrgSnapshot object
     api_version = "60.0"
@@ -724,13 +802,13 @@ class CreateScratchOrgSnapshot(BaseSalesforceTask):
             f"{self.options['snapshot_name']}{self.temp_snapshot_suffix}"
         )
         self.options["description"] = self.options.get("description")
+        
+class GithubCreateOrgSnapshot
 
 class CreateDependenciesSnapshot(BaseCreateScratchOrgSnapshot):
     task_docs = """
     Creates a Scratch Org Snapshot of the frozen dependencies flow, using the hash of the flow in the name
     for cross project dependency lookup by hash.
-    
-    **Requires** *`target-dev-hub` configured globally or for the project, used as the target Dev Hub org for Scratch Org Snapshots*.
     """
     task_options = {
         "resolution_strategy": {
