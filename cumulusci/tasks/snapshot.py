@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from typing import Dict, Optional
+from typing import Dict, List, Optional, Tuple
 import yaml
 from datetime import datetime, timedelta
 from dateutil.parser import parse
@@ -16,6 +16,7 @@ from cumulusci.salesforce_api.utils import get_simple_salesforce_connection
 from cumulusci.tasks.salesforce import BaseSalesforceTask
 from cumulusci.tasks.devhub import BaseDevhubTask
 from cumulusci.tasks.github.base import BaseGithubTask
+from cumulusci.utils.hashing import hash_dict
 from github3 import GitHubError
 from pydantic import BaseModel, Field, validator
 from simple_salesforce import Salesforce
@@ -724,10 +725,52 @@ class CreateScratchOrgSnapshot(BaseSalesforceTask):
         )
         self.options["description"] = self.options.get("description")
 
+class CreateDependenciesSnapshot(BaseCreateScratchOrgSnapshot):
+    task_docs = """
+    Creates a Scratch Org Snapshot of the frozen dependencies flow, using the hash of the flow in the name
+    for cross project dependency lookup by hash.
+    
+    **Requires** *`target-dev-hub` configured globally or for the project, used as the target Dev Hub org for Scratch Org Snapshots*.
+    """
+    task_options = {
+        "resolution_strategy": {
+            "description": "The resolution strategy to use resolving dynamic dependencies. Defaults to `production`.",
+            "required": False,
+        },
+        "hash": {
+            "description": "The hash of the dependencies to use in the snapshot name. Defaults to the hash of the resolved dependencies.",
+            "required": True,
+        },
+        **base_create_scratch_org_snapshot_options,
+    }
+    
+    def _init_options(self, kwargs):
+        super()._init_options(kwargs)
+        self.options["resolution_strategy"] = self.options.get("resolution_strategy", "production")
+        
+    def _init_task(self):
+        super()._init_task()
+        self.resolved, self.resolved_hash = self._get_dependencies()
+        self.snapshots = SnapshotManager(self.devhub, self.logger)
+        if self._should_create_snapshot() is not True:
+            self.options["snapshot_id"] = self.snapshots.existing_active_snapshot_id
+        else:
+            self.options["snapshot_name"] = self._generate_snapshot_name()
+        
+    def _generate_snapshot_name(self, name: str | None = None):
+        return "DEPS" + self.options["hash"]
+    
+    def _should_create_snapshot(self):
+        self.snapshots.query_existing_active_snapshot(self.options["snapshot_name"])
+        if self.snapshots.existing_active_snapshot_id:
+            return "Existing active snapshot found"
+        return True
 
 class GithubPullRequestSnapshot(BaseGithubTask, BaseDevhubTask):
     task_docs = """
     Creates a Scratch Org Snapshot for a GitHub Pull Request based on build status and conditions.
+    
+    **Requires** *`target-dev-hub` configured globally or for the project, used as the target Dev Hub org for Scratch Org Snapshots*.
     """
 
     task_options = {

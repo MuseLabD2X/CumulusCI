@@ -17,6 +17,7 @@ from cumulusci.core.dependencies.resolvers import (
 from cumulusci.core.exceptions import CumulusCIException, TaskOptionsError
 from cumulusci.core.tasks import BaseSalesforceTask
 from cumulusci.core.utils import process_bool_arg
+from cumulusci.utils.hashing import hash_dict
 from cumulusci.salesforce_api.package_install import (
     PACKAGE_INSTALL_TASK_OPTIONS,
     PackageInstallOptions,
@@ -200,6 +201,9 @@ class UpdateDependencies(BaseSalesforceTask):
                 filter_function=filter_function,
             )
         )
+
+        self.return_values["dependencies"] = dependencies
+        self.return_values["dependencies_hash"] = hash_dict(dependencies)
         self.logger.info("Collected dependencies:")
 
         for d in dependencies:
