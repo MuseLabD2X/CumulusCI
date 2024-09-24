@@ -10,6 +10,7 @@ from simple_salesforce import Salesforce
 from simple_salesforce.exceptions import SalesforceError, SalesforceResourceNotFound
 
 from cumulusci.core.config import BaseConfig
+from cumulusci.core.org_history import OrgHistory, actions_from_dict
 from cumulusci.core.exceptions import (
     CumulusCIException,
     DependencyResolutionError,
@@ -63,8 +64,10 @@ class OrgConfig(BaseConfig):
     refresh_token: str
     client_secret: str
     connected_app: str
+    track_history: bool
 
     createable: bool = None
+    history: OrgHistory = None
 
     # make sure it can be mocked for tests
     OAuth2Client = OAuth2Client
@@ -80,6 +83,8 @@ class OrgConfig(BaseConfig):
         self._installed_packages = None
         self._is_person_accounts_enabled = None
         self._multiple_currencies_is_enabled = False
+        actions = actions_from_dict(config.get("history", {}).get("actions", []))
+        self.history = OrgHistory.parse_obj({"actions": actions})
 
         super().__init__(config)
 
@@ -317,7 +322,8 @@ class OrgConfig(BaseConfig):
         To check if a required package is present, call `has_minimum_package_version()` with either the
         namespace or 033 Id of the desired package and its version, in 1.2.3 format.
 
-        Beta version of a package are represented as "1.2.3b5", where 5 is the build number."""
+        Beta version of a package are represented as "1.2.3b5", where 5 is the build number.
+        """
         if self._installed_packages is None:
             isp_result = self.salesforce_client.restful(
                 "tooling/query/?q=SELECT SubscriberPackage.Id, SubscriberPackage.NamespacePrefix, "
@@ -583,3 +589,44 @@ class OrgConfig(BaseConfig):
                 new_dependencies.append(dependency)
 
         return new_dependencies
+
+    def add_action_to_history(self, action):
+        """Add an entry to the org's history"""
+        if not self.track_history:
+            return
+
+        self.history.actions.append(action)
+        self.config["history"] = self.history.dict()
+        self.save()
+
+    def clear_history(self, after: str = None, before: str = None, hash: str = None):
+        """Clear the org's history"""
+        print(f"Starting length: {len(self.history.actions)}")
+
+        if hash:
+            # Find the index of the action with the matching hash
+            index = next(
+                (
+                    i
+                    for i, action in enumerate(self.history.actions)
+                    if action.hash_action == hash
+                ),
+                None,
+            )
+            if index is not None:
+                if after:
+                    # Exclude everything before the matching hash
+                    self.history.actions = self.history.actions[index:]
+                elif before:
+                    # Exclude everything after the matching hash
+                    self.history.actions = self.history.actions[:index]
+            else:
+                print(f"No action found with hash: {hash}")
+        else:
+            self.history.actions = []
+
+        self.history.hash_config = self.history.calculate_config_hash()
+
+        print(f"Ending length: {len(self.history.actions)}")
+        self.config["history"] = self.history.dict()
+        self.save()

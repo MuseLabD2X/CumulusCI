@@ -5,7 +5,7 @@ import os
 from cumulusci.core.dependencies.resolvers import get_static_dependencies
 from cumulusci.core.utils import process_list_arg
 from cumulusci.core.github import set_github_output
-from cumulusci.utils.hashing import hash_dict
+from cumulusci.utils.hashing import hash_obj
 from pydantic import BaseModel
 from .runtime import pass_runtime
 
@@ -40,7 +40,7 @@ def hash_config(
     config = runtime.project_config.config
     if locators:
         config = {loc: runtime.project_config.lookup(loc) for loc in locators}
-    config_hash = hash_dict(config)
+    config_hash = hash_obj(config)
     click.echo(f"Hash of CumulusCI Config{locators_str}:")
     click.echo(config_hash)
     output_name = "HASH_CONFIG"
@@ -70,7 +70,7 @@ def hash_flow(
     steps = flow.steps
     if freeze:
         steps = flow.freeze(org_config=None)
-    config_hash = hash_dict(steps)
+    config_hash = hash_obj(steps)
     click.echo(f"Hash of flow {flow_name}:")
     click.echo(config_hash)
     output_name = "HASH_FLOW__" + flow_name
@@ -99,6 +99,6 @@ def hash_dependencies(runtime, resolution_strategy):
         click.echo(dependency)
         dependencies.append(dependency.dict())
 
-    deps_hash = hash_dict(dependencies)
+    deps_hash = hash_obj(dependencies)
     click.echo(f"Hash of CumulusCI Dependencies for {resolution_strategy}:")
     click.echo(deps_hash)

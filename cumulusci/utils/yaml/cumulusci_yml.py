@@ -160,6 +160,7 @@ class ScratchOrg(CCIDictModel):
     setup_flow: str = None
     noancestors: bool = None
     release: Literal["preview", "previous"] = None
+    track_history: bool = False
 
 
 class Orgs(CCIDictModel):

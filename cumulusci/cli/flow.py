@@ -11,7 +11,7 @@ from cumulusci.core.github import set_github_output
 from cumulusci.core.exceptions import FlowNotFoundError
 from cumulusci.core.utils import format_duration
 from cumulusci.utils import document_flow, flow_ref_title_and_intro
-from cumulusci.utils.hashing import hash_dict
+from cumulusci.utils.hashing import hash_obj
 from cumulusci.utils.yaml.safer_loader import load_yaml_data
 
 from .runtime import pass_runtime
@@ -195,7 +195,6 @@ def flow_info(
     help="Specify a task or flow name to start from. All prior steps will be skippped.",
 )
 @click.option(
-
     "--load-yml",
     help="If set, loads the specified yml file into the the project config as additional config",
 )
@@ -246,7 +245,10 @@ def flow_run(
         coordinator.run(org_config)
         duration = datetime.now() - start_time
         click.echo(f"Ran {flow_name} in {format_duration(duration)}")
-    except Exception:
+        org_config.add_action_to_history(coordinator.action)
+    except Exception as e:
+        if coordinator.action:
+            org_config.add_action_to_history(coordinator.action)
         runtime.alert(f"Flow error: {flow_name}")
         raise
     finally:
@@ -310,7 +312,7 @@ def flow_freeze(runtime, flow_name, org, debug, o, no_prompt=True):
             stepnum = len(steps)
             steps[stepnum] = step
 
-        steps_hash = make_md5_hash(steps)
+        steps_hash = hash_obj(steps)
         duration = datetime.now() - start_time
         click.echo(f"Froze {flow_name} in {format_duration(duration)}")
         frozen_name = f"{flow_name}__{steps_hash}"

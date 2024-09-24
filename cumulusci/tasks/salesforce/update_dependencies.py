@@ -17,7 +17,7 @@ from cumulusci.core.dependencies.resolvers import (
 from cumulusci.core.exceptions import CumulusCIException, TaskOptionsError
 from cumulusci.core.tasks import BaseSalesforceTask
 from cumulusci.core.utils import process_bool_arg
-from cumulusci.utils.hashing import hash_dict
+from cumulusci.utils.hashing import hash_obj
 from cumulusci.salesforce_api.package_install import (
     PACKAGE_INSTALL_TASK_OPTIONS,
     PackageInstallOptions,
@@ -203,7 +203,7 @@ class UpdateDependencies(BaseSalesforceTask):
         )
 
         self.return_values["dependencies"] = dependencies
-        self.return_values["dependencies_hash"] = hash_dict(dependencies)
+        self.return_values["dependencies_hash"] = hash_obj(dependencies)
         self.logger.info("Collected dependencies:")
 
         for d in dependencies:
@@ -223,6 +223,8 @@ class UpdateDependencies(BaseSalesforceTask):
         if self.options["interactive"]:
             if not click.confirm("Continue to install dependencies?", default=True):
                 raise CumulusCIException("Dependency installation was canceled.")
+
+        self.return_values["dependencies"] = dependencies
 
         for d in dependencies:
             self._install_dependency(d)
