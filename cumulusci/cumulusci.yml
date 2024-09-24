@@ -200,7 +200,7 @@ tasks:
     create_snapshot:
         group: Org Snapshots
         description: Create a Scratch Org Snapshot of the current scratch org in the default SF CLI devhub
-        class_path: cumulusci.tasks.snapshot.CreateScratchOrgSnapshot
+        class_path: cumulusci.tasks.snapshot.CreateOrgSnapshot
         options:
             wait: True
     create_unmanaged_ee_src:

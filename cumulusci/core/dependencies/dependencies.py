@@ -56,9 +56,9 @@ def _validate_github_parameters(values):
 
     # Populate the `github` property if not already populated.
     if not values.get("github") and values.get("repo_name"):
-        values[
-            "github"
-        ] = f"https://github.com/{values['repo_owner']}/{values['repo_name']}"
+        values["github"] = (
+            f"https://github.com/{values['repo_owner']}/{values['repo_name']}"
+        )
         values.pop("repo_owner")
         values.pop("repo_name")
 
@@ -67,12 +67,10 @@ def _validate_github_parameters(values):
 
 class DependencyPin(HashableBaseModel, abc.ABC):
     @abc.abstractmethod
-    def can_pin(self, d: "DynamicDependency") -> bool:
-        ...
+    def can_pin(self, d: "DynamicDependency") -> bool: ...
 
     @abc.abstractmethod
-    def pin(self, d: "DynamicDependency", context: BaseProjectConfig):
-        ...
+    def pin(self, d: "DynamicDependency", context: BaseProjectConfig): ...
 
 
 DependencyPin.update_forward_refs()
@@ -328,9 +326,9 @@ class GitHubDynamicDependency(BaseGitHubDependency):
                         subfolder=this_subfolder,
                         unmanaged=not managed,
                         namespace_inject=namespace if namespace and managed else None,
-                        namespace_strip=namespace
-                        if namespace and not managed
-                        else None,
+                        namespace_strip=(
+                            namespace if namespace and not managed else None
+                        ),
                     )
                 )
 
@@ -724,6 +722,23 @@ def parse_pins(pins: Optional[List[dict]]) -> List[DependencyPin]:
         parsed_pins.append(parsed)
 
     return parsed_pins
+
+
+InputDependencyType = (
+    GitHubDynamicDependency
+    | GitHubDynamicSubfolderDependency
+    | PackageNamespaceVersionDependency
+    | PackageVersionIdDependency
+    | UnmanagedGitHubRefDependency
+    | UnmanagedZipURLDependency
+)
+
+OutputDependencyType = (
+    PackageNamespaceVersionDependency
+    | PackageVersionIdDependency
+    | UnmanagedGitHubRefDependency
+    | UnmanagedZipURLDependency
+)
 
 
 AVAILABLE_DEPENDENCY_PIN_CLASSES = [GitHubDependencyPin]
