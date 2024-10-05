@@ -42,6 +42,9 @@ class Deploy(BaseSalesforceMetadataApiTask):
         "check_only": {
             "description": "If True, performs a test deployment (validation) of components without saving the components in the target org"
         },
+        "hash_only": {
+            "description": "If True, only computes the hash of the deployment package and does not deploy"
+        },
         "collision_check": {
             "description": "If True, performs a collision check with metadata already present in the target org"
         },
@@ -110,6 +113,10 @@ class Deploy(BaseSalesforceMetadataApiTask):
                     f"The validation error was {str(e)}"
                 )
 
+        self.options["hash_only"] = process_bool_arg(
+            self.options.get("hash_only", False)
+        )
+
         # Set class variable to true if rest_deploy is set to True
         self.rest_deploy = process_bool_arg(self.options.get("rest_deploy", False))
 
@@ -139,6 +146,10 @@ class Deploy(BaseSalesforceMetadataApiTask):
             self.logger.warning("Deployment package is empty; skipping deployment.")
             return
 
+        if self.options.get("hash_only"):
+            self.logger.info("Hash only mode; skipping deployment.")
+            return
+
         # If rest_deploy param is set, update api_class to be RestDeploy
         if self.rest_deploy:
             self.api_class = RestDeploy
@@ -150,6 +161,13 @@ class Deploy(BaseSalesforceMetadataApiTask):
             check_only=self.check_only,
             test_level=self.test_level,
             run_tests=self.specified_tests,
+        )
+
+    def _track_metadata_request(self, api):
+        self._track_metadata_deploy(
+            path=self.options.get("path"),
+            hash=self.package_hash,
+            size=self.package_size,
         )
 
     def _has_namespaced_package(self, ns: Optional[str]) -> bool:
@@ -244,7 +262,10 @@ class Deploy(BaseSalesforceMetadataApiTask):
                 # If the package is empty, do nothing.
                 if not package_zip.zf.namelist():
                     return
-                return package_zip.as_base64()
+                self.package_hash = package_zip.as_hash()
+                package_zip_base64 = package_zip.as_base64()
+                self.package_size = len(package_zip_base64)
+                return package_zip_base64
             else:
                 return xml_map
 

@@ -88,7 +88,7 @@ from cumulusci.core.exceptions import (
     TaskImportError,
 )
 from cumulusci.utils import cd
-from cumulusci.utils.version_strings import LooseVersion
+from cumulusci.utils.version_strings import StepVersion
 
 if TYPE_CHECKING:
     from cumulusci.core.tasks import BaseTask
@@ -97,14 +97,6 @@ if TYPE_CHECKING:
 RETURN_VALUE_OPTION_PREFIX = "^^"
 
 jinja2_env = ImmutableSandboxedEnvironment()
-
-
-class StepVersion(LooseVersion):
-    """Like LooseVersion, but converts "/" into -1 to support comparisons"""
-
-    def parse(self, vstring: str):
-        super().parse(vstring)
-        self.version = tuple(-1 if x == "/" else x for x in self.version)
 
 
 class StepSpec:
@@ -155,6 +147,8 @@ class StepSpec:
         start_from: Optional[str] = None,
         when: Optional[str] = None,
     ):
+        if not isinstance(step_num, StepVersion):
+            step_num = StepVersion(step_num)
         self.step_num = step_num
         self.task_name = task_name
         self.task_config = task_config
@@ -394,7 +388,10 @@ class FlowCoordinator:
             name=self.name,
             description=self.flow_config.description,
             group=self.flow_config.group,
-            config_steps=self.flow_config.config.get("steps"),
+            config_steps={
+                StepVersion(str(key)): step
+                for key, step in self.flow_config.config.get("steps").items()
+            },
             steps=[],
             repo=self.project_config.repo_url,
             branch=self.project_config.repo_branch,

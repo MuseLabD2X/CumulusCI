@@ -1,5 +1,6 @@
 import os
 from typing import Dict, Literal, List, Optional
+from datetime import datetime
 from dateutil.parser import parse
 from cumulusci.core.dependencies.dependencies import (
     InputDependencyType,
@@ -24,7 +25,7 @@ from cumulusci.utils.options import (
     FilePath,
     Field,
 )
-from cumulusci.utils.yaml.render import dump_yaml
+from cumulusci.utils.yaml.render import yaml_dump
 from github3 import GitHubError
 from pydantic import BaseModel
 from rich.console import Console
@@ -112,24 +113,24 @@ class HashedDependencies(HashedValue):
     )
 
 
-class DependenciesHashOptions(CCIOptions):
-    dependencies_hash: Optional[str] = Field(
+class HashOptions(CCIOptions):
+    snapshot_hash: Optional[str] = Field(
         None,
         description=(
-            "The hash of the project's dependencies deployed to the scratch org "
+            "The hash of the tracked operations that made changes to the scratch org "
             "using the org's history if track_history is enabled. Pass a value to override"
         ),
     )
     force_hash: bool = Field(
         False,
         description=(
-            "Whether to force use of the passed hash value for dependencies, overriding "
-            "the dependency hash value from the org's history if available. Defaults to False."
+            "Whether to force use of the passed hash value for the snapshot_hash, overriding "
+            "the snapshot hash value from the org's history if available. Defaults to False."
         ),
     )
 
 
-class DescriptionHashOptions(CCIOptions):
+class DescriptionDataOptions(CCIOptions):
     flows: Optional[List[HashedFlow]] = Field(
         None,
         description=(
@@ -188,13 +189,13 @@ class SnapshotNameOptions(CCIOptions):
         ...,
         description=(
             "Name of the snapshot to create. Must be a valid snapshot name. "
-            "Max 14 characters, alphanumeric, and start with a letter including product code and packaging suffix."
+            "Max 14 characters, alphanumeric, and start with a letter including project code and packaging suffix."
         ),
     )
 
 
 class NameContextOptions(CCIOptions):
-    include_product_code: bool = Field(
+    include_project_code: bool = Field(
         True,
         description=(
             "Whether to include the project code as a prefix in the snapshot name. "
@@ -219,13 +220,17 @@ class NameContextOptions(CCIOptions):
 class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
     """Base class for tasks that create Scratch Org Snapshots."""
 
+    # Peg to API Version 60.0 for OrgSnapshot object
+    api_version = "60.0"
+    salesforce_task = True
+
     class Options(BaseCreateScratchOptions):
         pass
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.current_snapshot_id = None
-        self.temp_snapshot_name = None
+        self.snapshot_name = None
         self.devhub = None
         self.snapshots = None
         self.snapshot_id = None
@@ -235,39 +240,46 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
         self.devhub = self._get_devhub_api()
         self.console = Console()
         self.is_github_job = os.getenv("GITHUB_ACTIONS") == "true"
+        self.snapshot_name = self._generate_snapshot_name(
+            self.parsed_options.snapshot_name
+            if hasattr(self.parsed_options, "snapshot_name")
+            else None
+        )
+        self.start_time = self._format_datetime(self._get_current_time())
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
-        self.parsed_options.flows = process_list_arg(
-            self.parsed_options.get("flows", self.flow.name if self.flow else None)
-        )
-        self.parsed_options.wait = process_bool_arg(
-            self.parsed_options.get("wait", True)
-        )
-        self.parsed_options.snapshot_id = self.parsed_options.get("snapshot_id")
-        if self.parsed_options.get("snapshot_name"):
-            self._validate_snapshot_name(self.parsed_options.snapshot_name)
-            self._set_temp_snapshot_name(self.parsed_options.snapshot_name)
-        else:
-            self.parsed_options.snapshot_name = None
-        self.parsed_options.source_org_id = self.parsed_options.get("source_org_id")
-        self.parsed_options.pull_request = self._lookup_pull_request()
-        self.parsed_options.create_commit_status = process_bool_arg(
-            self.parsed_options.get("create_commit_status", False)
-        )
-        self.parsed_options.create_environment = process_bool_arg(
-            self.parsed_options.get("create_environment", False)
-        )
-        self.parsed_options.commit_status_context = self.parsed_options.get(
-            "commit_status_context"
-        )
-        self.parsed_options.environment_prefix = self.parsed_options.get(
-            "environment_prefix"
-        )
+        if isinstance(self.Options, BaseCreateScratchOptions):
+            self.parsed_options.wait = process_bool_arg(self.parsed_options.wait)
+            self.parsed_options.snapshot_id = self.parsed_options.snapshot_id
+            self.parsed_options.source_org_id = self.parsed_options.source_org_id
+        if isinstance(self.Options, DescriptionDataOptions):
+            flows = self.parsed_options.flows or self.flow.name if self.flow else None
+            if not flows and self.org_config.track_history:
+                flows = [
+                    flow.name
+                    for flow in self.org_config.history.filtered_actions(
+                        {"action_type": "Flow"}
+                    )
+                ]
+
+            self.parsed_options.flows = process_list_arg(
+                self.parsed_options.flows or self.flow.name if self.flow else None
+            )
+            self.parsed_options.pull_request = self._lookup_pull_request()
+        if isinstance(self.Options, GithubCommitStatusOptions):
+            self.parsed_options.create_commit_status = process_bool_arg(
+                self.parsed_options.create_commit_status
+            )
+        if isinstance(self.Options, GithubEnvironmentOptions):
+            self.parsed_options.create_environment = process_bool_arg(
+                self.parsed_options.create_environment
+            )
 
         self.description = {
             "pr": None,
             "org": self.org_config.name if self.org_config else None,
+            "hash": self.org_config.history.get_snapshot_hash(),
             "commit": (
                 self.project_config.repo_commit[:7]
                 if self.project_config.repo_commit
@@ -284,20 +296,20 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
     def _run_task(self):
         skip_reason = self._should_create_snapshot()
         snapshot_manager = SnapshotManager(self.devhub, self.logger)
-        if skip_reason:
-            if skip_reason is not True:
-                self.logger.info(f"Skipping snapshot creation: {skip_reason}")
-                if self.parsed_options.get("snapshot_id"):
-                    self.logger.warning(
-                        "In-progress snapshot does not meet conditions for finalization. Deleting..."
-                    )
-                    self.console.print(
-                        Panel(
-                            f"No snapshot creation required based on current conditions. {self.return_values.get('skip_reason','')}",
-                            title="Snapshot Creation",
-                            border_style="yellow",
-                        )
-                    )
+        if skip_reason and skip_reason is not True:
+            # self.logger.info(f"Skipping snapshot creation: {skip_reason}")
+            # if self.parsed_options.snapshot_id:
+
+            #     self.logger.warning(
+            #         "In-progress snapshot does not meet conditions for finalization. Deleting..."
+            #     )
+            self.console.print(
+                Panel(
+                    f"No snapshot creation required based on current conditions. {self.return_values.get('skip_reason','')}",
+                    title="Snapshot Creation",
+                    border_style="yellow",
+                )
+            )
             return
 
         self.logger.info("Starting scratch org snapshot creation")
@@ -312,7 +324,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
                     snapshot_id=self.parsed_options.snapshot_id,
                 )
             else:
-                snapshot = snapshot_manager.update_snapshot_from_org(
+                snapshot = snapshot_manager.create_snapshot_from_org(
                     base_name=snapshot_name,
                     description=description,
                     source_org=self.org_config.org_id,
@@ -355,7 +367,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
         return True
 
     def _lookup_pull_request(self):
-        if self.parsed_options.get("pull_request"):
+        if self.parsed_options.pull_request:
             return self.parsed_options.pull_request
 
     def _validate_snapshot_name(self, snapshot_name):
@@ -389,30 +401,41 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
                 "Unable to generate snapshot name. Please provide a snapshot name."
             )
 
-        project_code = self.project_config.project_code
+        # Handle prefixing with project code
+        project_code = ""
+        if (
+            hasattr(self.parsed_options, "include_project_code")
+            and self.parsed_options.include_project_code
+        ):
+            project_code = self.project_config.project_code
+
+        # Handle packaging suffix
         packaged_code = ""
-        if self.parsed_options.is_packaged is True:
-            packaged_code = "P"
-        elif self.parsed_options.is_packaged is False:
-            packaged_code = "U"
+        if (
+            hasattr(self.parsed_options, "include_packaging_suffix")
+            and self.parsed_options.include_packaging_suffix
+        ):
+            packaged_code = self.parsed_options.packaging_suffix
+
+        # Calculate available length for snapshot name, max 14 characters to reserve space for
         available_length = 14 - len(packaged_code) - len(project_code)
+        original_name = f"{name}"
         name = f"{project_code}{name[:available_length]}{packaged_code}"
+        if len(original_name) > available_length:
+            self.logger.warning(
+                f"Snapshot name '{original_name}' exceeds maximum length of {available_length} characters. Truncated to '{name}'."
+            )
+
         self._validate_snapshot_name(name)
         return name
 
-    def _set_temp_snapshot_name(self, name: str):
-        name = f"{name}{self.temp_snapshot_suffix}"
-        self._validate_snapshot_name(name)
-        self.temp_snapshot_name = name
-        return self.temp_snapshot_name
-
     def _generate_snapshot_description(self, pr_number: Optional[int] = None):
         return (
-            " ".join([f"{k}: {v}" for k, v in self.description.items() if v])
+            " ".join([f"{k}:{v}" for k, v in self.description.items() if v])
         ).strip()[:255]
 
     def _parse_snapshot_description(self, description: str):
-        return dict(item.split(": ") for item in description.split(" ") if ": " in item)
+        return dict(item.split(":") for item in description.split(" ") if ":" in item)
 
     def _check_snapshot_description(self, description):
         if isinstance(description, str):
@@ -420,7 +443,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
         if description != self.description:
             raise ScratchOrgSnapshotFailure(
                 f"Snapshot description does not match expected description.\n\n"
-                f"Expected: {dump_yaml(self.description)}\n\nActual: {dump_yaml(description)}"
+                f"Expected: {yaml_dump(self.description, include_types=True)}\n\nActual: {yaml_dump(description, include_types=True)}"
             )
 
     def _create_commit_status(self, snapshot_name, state):
@@ -520,6 +543,9 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
                 for key, value in (extra or {}).items():
                     f.write(f"- **{key}**: {value}\n")
 
+    def _get_current_time(self):
+        return datetime.now().isoformat()
+
     def _format_datetime(self, date_string):
         if date_string is None:
             return "N/A"
@@ -557,76 +583,67 @@ class CreateOrgSnapshot(BaseCreateOrgSnapshot):
     - Report the snapshot details including the ID, status, and expiration date
     """
 
-    temp_snapshot_suffix = "0"
-
     class Options(
         BaseCreateScratchOptions,
         SnapshotNameOptions,
         NameContextOptions,
-        DescriptionHashOptions,
+        DescriptionDataOptions,
         GithubCommitStatusOptions,
         GithubEnvironmentOptions,
     ):
         pass
 
-    # Peg to API Version 60.0 for OrgSnapshot object
-    api_version = "60.0"
-    salesforce_task = True
 
-    def _init_options(self, kwargs):
-        super()._init_options(kwargs)
-        self.temp_snapshot_name = (
-            f"{self.parsed_options['snapshot_name']}{self.temp_snapshot_suffix}"
-        )
-        self.parsed_options.description = self.parsed_options.get("description")
-
-
-class CreateDependenciesSnapshot(BaseCreateOrgSnapshot):
+class CreateHashedSnapshot(BaseCreateOrgSnapshot):
     task_docs = """
-    Creates a Scratch Org Snapshot of the frozen dependencies flow, using the hash of the flow in the name
-    for cross project dependency lookup by hash.
+    Creates a Scratch Org Snapshot of the target org using a hash representing the org's shape and 
+    operations run against it to uniquely identify the org state for looking up snapshots using the hash.
     """
 
     class Options(
         GithubEnvironmentOptions,
         GithubCommitStatusOptions,
-        DescriptionHashOptions,
-        BaseCreateScratchOptions,
+        DescriptionDataOptions,
         NameContextOptions,
-        DependenciesHashOptions,
+        BaseCreateScratchOptions,
+        HashOptions,
     ):
         pass
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
         if self.org_config.track_history:
-            dependencies = self.org_config.history.get_current_dependencies()
-            passed_hash = self.parsed_options.get("dependencies_hash")
-            if passed_hash and passed_hash != hash_obj(dependencies):
+            snapshot_hash = self.org_config.history.get_snapshot_hash()
+            passed_hash = self.parsed_options.snapshot_hash
+            if passed_hash and passed_hash != snapshot_hash:
                 self.logger.warning(
                     "Passed hash does not match current dependencies hash from the org history. Using current dependencies."
                 )
-            self.parsed_options.dependencies_hash = hash_obj(dependencies)
-        self.parsed_options.resolution_strategy = self.parsed_options.get(
-            "resolution_strategy", "production"
-        )
+            self.parsed_options.snapshot_hash = snapshot_hash
+        else:
+            if not self.parsed_options.snapshot_hash:
+                raise ScratchOrgSnapshotError(
+                    "Dependencies hash required when track_history is not enabled."
+                )
 
     def _init_task(self):
         super()._init_task()
 
         self.snapshots = SnapshotManager(self.devhub, self.logger)
         if self._should_create_snapshot() is not True:
-            self.parsed_options.snapshot_id = self.snapshots.existing_active_snapshot_id
+            self.parsed_options.snapshot_id = self.snapshots.existing_active_snapshot[
+                "Id"
+            ]
         else:
-            self.parsed_options.snapshot_name = self._generate_snapshot_name()
+            self.snapshot_name = self._generate_snapshot_name()
 
     def _generate_snapshot_name(self, name: str | None = None):
-        name = f"D{self.parsed_options['dependencies_hash']}"
+        name = f"DEP{self.parsed_options.snapshot_hash}"
         return super()._generate_snapshot_name(name)
 
     def _should_create_snapshot(self):
-        self.snapshots.query_existing_active_snapshot(self.parsed_options.snapshot_name)
-        if self.snapshots.existing_active_snapshot_id:
+        self.snapshots.query_existing_active_snapshot(self.snapshot_name)
+        if self.snapshots.existing_active_snapshot:
             return "Existing active snapshot found"
         return True
 
@@ -723,38 +740,26 @@ class GithubPullRequestSnapshot(BaseGithubTask, BaseCreateOrgSnapshot):
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
         self.parsed_options.build_success = process_bool_arg(
-            self.parsed_options.get("build_success", True)
+            self.parsed_options.build_success
         )
         self.parsed_options.build_fail_tests = process_bool_arg(
-            self.parsed_options.get("build_fail_tests")
+            self.parsed_options.build_fail_tests
         )
-        self.parsed_options.commit_status_context = self.parsed_options.get(
-            "commit_status_context"
-        )
-        self.parsed_options.wait = process_bool_arg(
-            self.parsed_options.get("wait", True)
-        )
-        self.parsed_options.snapshot_id = self.parsed_options.get("snapshot_id")
+        self.parsed_options.wait = process_bool_arg(self.parsed_options.wait)
         self.parsed_options.snapshot_pr = process_bool_arg(
-            self.parsed_options.get("snapshot_pr", True)
+            self.parsed_options.snapshot_pr
         )
         self.parsed_options.snapshot_pr_draft = process_bool_arg(
-            self.parsed_options.get("snapshot_pr_draft", False)
+            self.parsed_options.snapshot_pr_draft
         )
         self.parsed_options.snapshot_fail_pr = process_bool_arg(
-            self.parsed_options.get("snapshot_fail_pr", True)
+            self.parsed_options.snapshot_fail_pr
         )
         self.parsed_options.snapshot_fail_pr_draft = process_bool_arg(
-            self.parsed_options.get("snapshot_fail_pr_draft", False)
+            self.parsed_options.snapshot_fail_pr_draft
         )
         self.parsed_options.snapshot_fail_test_only = process_bool_arg(
-            self.parsed_options.get("snapshot_fail_test_only", False)
-        )
-        self.parsed_options.snapshot_pr_label = self.parsed_options.get(
-            "snapshot_pr_label"
-        )
-        self.parsed_options.snapshot_fail_pr_label = self.parsed_options.get(
-            "snapshot_fail_pr_label"
+            self.parsed_options.snapshot_fail_test_only
         )
 
         self.console = Console()

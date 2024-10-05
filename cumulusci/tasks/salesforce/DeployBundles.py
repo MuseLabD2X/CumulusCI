@@ -37,6 +37,8 @@ class DeployBundles(Deploy):
 
     def _deploy_bundle(self, path):
         api = self._get_api(path)
+        if api is None:
+            return
         return api()
 
     def freeze(self, step):

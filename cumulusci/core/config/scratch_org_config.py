@@ -146,11 +146,8 @@ class ScratchOrgConfig(SfdxOrgConfig):
         except json.decoder.JSONDecodeError:
             raise_error()
 
-        if (
-            not (res := result.get("result"))
-            or ("username" not in res)
-            or ("orgId" not in res)
-        ):
+        res = result.get("result")
+        if not res or ("username" not in res) or ("orgId" not in res):
             raise_error()
 
         if res["username"] is None:
@@ -170,12 +167,13 @@ class ScratchOrgConfig(SfdxOrgConfig):
             f"Created: OrgId: {self.config['org_id']}, Username:{self.config['username']}"
         )
 
+        scratch_org_info = res.get("ScratchOrgInfo", {})
         org_action_info["status"] = "success"
         org_action_info["org_id"] = self.org_id
         org_action_info["sfdx_alias"] = self.sfdx_alias
         org_action_info["username"] = self.username
-        org_action_info["login_url"] = res.get("ScratchOrgInfo", {}).get("LoginUrl")
-        org_action_info["instance"] = res.get("ScratchOrgInfo", {}).get("Instance")
+        org_action_info["login_url"] = scratch_org_info.get("LoginUrl")
+        org_action_info["instance"] = scratch_org_info.get("Instance")
         org_action_info["devhub"] = self.devhub
         self.add_action_to_history(
             OrgCreateAction(

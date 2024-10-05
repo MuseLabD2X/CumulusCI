@@ -7,15 +7,19 @@ from github3.repos.branch import Branch
 from github3.repos.commit import RepoCommit, ShortCommit
 from github3.repos.repo import Repository
 
+from cumulusci.core.config.org_config import OrgConfig
 from cumulusci.core.config.project_config import BaseProjectConfig
 from cumulusci.core.dependencies.dependencies import (
     BaseGitHubDependency,
     Dependency,
     DependencyPin,
     DynamicDependency,
+    OutputDependencyType,
     PackageNamespaceVersionDependency,
     PackageVersionIdDependency,
     StaticDependency,
+    UnmanagedGitHubRefDependency,
+    UnmanagedZipURLDependency,
     parse_dependencies,
     parse_pins,
 )
@@ -32,6 +36,11 @@ from cumulusci.core.github import (
     find_repo_feature_prefix,
     get_version_id_from_commit,
 )
+from cumulusci.core.org_history import (
+    ActionPackageInstall,
+    ActionGithubMetadataDeploy,
+    ActionUrlMetadataDeploy,
+)
 from cumulusci.core.versions import PackageType
 from cumulusci.utils.git import (
     construct_release_branch_name,
@@ -40,6 +49,7 @@ from cumulusci.utils.git import (
     is_release_branch_or_child,
     is_child_branch,
 )
+from cumulusci.utils.hashing import hash_obj
 
 
 class DependencyResolutionStrategy(StrEnum):
@@ -271,8 +281,7 @@ class AbstractGitHubCommitStatusPackageResolver(AbstractResolver, abc.ABC):
         self,
         dep: BaseGitHubDependency,
         context: BaseProjectConfig,
-    ) -> List[Branch]:
-        ...
+    ) -> List[Branch]: ...
 
     def resolve(
         self, dep: BaseGitHubDependency, context: BaseProjectConfig
@@ -307,6 +316,7 @@ class AbstractGitHubCommitStatusPackageResolver(AbstractResolver, abc.ABC):
         )
         return (None, None)
 
+
 class AbstractGitHubParentBranchResolver(
     AbstractGitHubCommitStatusPackageResolver, abc.ABC
 ):
@@ -339,13 +349,11 @@ class AbstractGitHubParentBranchResolver(
             )
             return []
 
-        # Construct a list of all parent branches for a child with format feature/foo__bar__baz        
+        # Construct a list of all parent branches for a child with format feature/foo__bar__baz
         parents = []
         branch_parts = context.repo_branch[len(remote_branch_prefix) :].split("__")
         for i in range(1, len(branch_parts)):
-            parents.append(
-                f"{remote_branch_prefix}{'__'.join(branch_parts[:i])}"
-            )
+            parents.append(f"{remote_branch_prefix}{'__'.join(branch_parts[:i])}")
 
         # We will check at least the release branch corresponding to our release id.
         # We may be configured to check backwards on release branches.
@@ -358,6 +366,7 @@ class AbstractGitHubParentBranchResolver(
                 pass
 
         return branches
+
 
 class AbstractGitHubReleaseBranchResolver(
     AbstractGitHubCommitStatusPackageResolver, abc.ABC
@@ -505,6 +514,7 @@ class GitHubExactMatch2GPResolver(AbstractGitHubExactMatchCommitStatusResolver):
     commit_status_context = "2gp_context"
     commit_status_default = "Build Feature Test Package"
 
+
 class GitHubParentBranch2GPResolver(AbstractGitHubParentBranchResolver):
     """Resolver that identifies a ref by finding a 2GP package version
     in a commit status on a branch whose name matches the local branch."""
@@ -523,6 +533,7 @@ class GitHubExactMatchUnlockedCommitStatusResolver(
     name = "GitHub Exact-Match Unlocked Commit Status Resolver"
     commit_status_context = "unlocked_context"
     commit_status_default = "Build Unlocked Test Package"
+
 
 class GitHubParentBranchUnlockedCommitStatusResolver(
     AbstractGitHubParentBranchResolver
@@ -692,6 +703,83 @@ def get_static_dependencies(
     # Make sure, if we had no flattening or resolving to do, that we apply the ignore list.
     # Type is guaranteed via the logic above.
     return [d for d in dependencies if filter_function(d)]  # type: ignore
+
+
+class DummyDependencyOrg:
+    def __init__(self, installed_packages: dict = {}):
+        self.installed_packages = installed_packages
+
+
+def hash_static_dependencies(
+    project_config: BaseProjectConfig,
+    dependencies: List[OutputDependencyType],
+    org_config: Optional[OrgConfig | DummyDependencyOrg] = None,
+) -> Tuple[str, dict]:
+    """
+    Hash the resolved static dependencies of a CumulusCI project.
+
+    Produce a dict like the following then hash it as json, returning the hash and the dict:
+    {
+        "deploys": [
+            "3b903e8354fca69fb62f5018642736d4e40ad9f0b22457451514412967b8bfcbd8e0d0e83e52aa580a2d99b09bd0186bdece5ca9ee7e7091bd99cc5b05346cb1",
+            "d9ca28ee6abdcfce9356fa4db8beeee22c14d0e65899a2b4eef01b5f2819725668c5cecec21fc40bd8752f10075465c82f1a6a13da35348a164426727fe96efb",
+            "e970dfd6baa502cb355bbf11e9d7f11f79e67d1e6dff9b4a9a48a02d02953d4e461fb119945185b7582f73e268c89ccf8a8bc91329e163edec29d76822df0c28",
+        ],
+        "transforms": [
+            "6b598815",
+            "bf0b138a"
+        ],
+        "package_installs": [
+            "c2c5a01f",
+            "6ea177ba",
+            "867a02c6",
+            "91a13c46",
+            "98f25289",
+            "5d87d0b1"
+        ]
+    }
+    """
+
+    if not org_config:
+        org_config = DummyDependencyOrg()
+
+    # Verify that we have only StaticDependencies
+    non_static_dependencies = [
+        d for d in dependencies if not isinstance(d, StaticDependency)
+    ]
+    if non_static_dependencies:
+        raise CumulusCIException(
+            f"Expected only StaticDependencies, found {non_static_dependencies}"
+        )
+
+    data = {
+        "deploys": [],
+        "package_installs": [],
+        "transforms": [],
+    }
+    for dep in dependencies:
+        if hasattr(dep, "get_package_install_tracking_data"):
+            tracker = ActionPackageInstall.parse_obj(
+                dep.get_package_install_tracking_data()
+            )
+            data["package_installs"].append(tracker.hash)
+        if isinstance(dep, UnmanagedGitHubRefDependency):
+            tracker = ActionGithubMetadataDeploy.parse_obj(
+                dep.get_deploy_tracking_data(
+                    project_config=project_config,
+                    org_config=org_config,
+                )
+            )
+            data["deploys"].append(tracker.hash)
+        if isinstance(dep, UnmanagedZipURLDependency):
+            tracker = ActionUrlMetadataDeploy.parse_obj(
+                dep.get_deploy_tracking_data(
+                    project_config=project_config,
+                    org_config=org_config,
+                )
+            )
+            data["deploys"].append(tracker.hash)
+    return hash_obj(data), data
 
 
 def resolve_dependency(

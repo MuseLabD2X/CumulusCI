@@ -193,10 +193,13 @@ tasks:
             user_permissions:
                 - PermissionsBulkApiHardDelete
                 - PermissionsCreateAuditFields
-    create_dependencies_snapshot:
-        description: Create a snapshot of the current dependencies in the project
-        class_path: cumulusci.tasks.snapshot.CreateDependenciesSnapshot
+    create_hashed_snapshot:
+        description: Create a snapshot using the org history's snapshot hash in the name
+        class_path: cumulusci.tasks.snapshot.CreateHashedSnapshot
         group: Org Snapshots
+        options:
+            include_project_code: False
+            include_packaging_suffix: False
     create_snapshot:
         group: Org Snapshots
         description: Create a Scratch Org Snapshot of the current scratch org in the default SF CLI devhub

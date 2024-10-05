@@ -1,3 +1,4 @@
+import os
 from typing import List
 
 import click
@@ -6,6 +7,8 @@ from cumulusci.core.dependencies.dependencies import (
     Dependency,
     PackageNamespaceVersionDependency,
     PackageVersionIdDependency,
+    UnmanagedGitHubRefDependency,
+    UnmanagedZipURLDependency,
     parse_dependencies,
 )
 from cumulusci.core.dependencies.resolvers import (
@@ -235,11 +238,26 @@ class UpdateDependencies(BaseSalesforceTask):
         if isinstance(
             dependency, (PackageNamespaceVersionDependency, PackageVersionIdDependency)
         ):
+            track_data = dependency.get_package_install_tracking_data()
+            self._track_package_install(**track_data)
             dependency.install(
                 self.project_config, self.org_config, self.install_options
             )
         else:
             dependency.install(self.project_config, self.org_config)
+            if dependency.hash:
+                if isinstance(dependency, UnmanagedGitHubRefDependency):
+                    self._track_github_metadata_deploy(
+                        **dependency.get_deploy_tracking_data(),
+                    )
+                elif isinstance(dependency, UnmanagedZipURLDependency):
+                    self._track_url_metadata_deploy(
+                        **dependency.get_deploy_tracking_data(),
+                    )
+                else:
+                    raise CumulusCIException(
+                        f"Unsupported dependency type: {type(dependency)}"
+                    )
 
     def freeze(self, step):
         if self.options["interactive"]:

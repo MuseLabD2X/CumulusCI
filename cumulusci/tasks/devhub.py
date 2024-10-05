@@ -69,6 +69,10 @@ class BaseDevhubTask(BaseSalesforceTask):
         return get_simple_salesforce_connection(
             project_config=self.project_config,
             org_config=devhub,
-            api_version=self.api_version,
+            api_version=(
+                self.api_version
+                if hasattr(self, "api_version")
+                else self.project_config.project__package__api_version
+            ),
             base_url=base_url,
         )

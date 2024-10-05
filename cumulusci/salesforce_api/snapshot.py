@@ -35,13 +35,11 @@ ORG_SNAPSHOT_FIELDS = [
 
 
 class SnapshotNameValidator(BaseModel):
-    base_name: str = Field(..., max_length=13)
+    base_name: str = Field(..., max_length=15)
 
     @classmethod
     @validator("base_name")
     def validate_name(cls, name):
-        if len(name) > 13:
-            raise ValueError("Snapshot name cannot exceed 13 characters")
         if not name.isalnum():
             raise ValueError("Snapshot name must only contain alphanumeric characters")
         if name[0].isdigit():
@@ -49,17 +47,18 @@ class SnapshotNameValidator(BaseModel):
         return name
 
 class SnapshotManager:
-    def __init__(self, devhub, logger):
+    def __init__(self, devhub, logger, temp_suffix: str = "X"):
         self.devhub = devhub
         self.logger = logger
-        self.existing_active_snapshot_id = None
+        self.temp_suffix = temp_suffix
+        self.existing_active_snapshot: dict | None = None
         self.temporary_snapshot_name = None
         self.console = Console()
 
-    def generate_temp_name(self, base_name: str, max_length: int = 14) -> str:
-        temp_name = f"{base_name}0"
+    def generate_temp_name(self, base_name: str, max_length: int = 15) -> str:
+        temp_name = f"{base_name}{self.temp_suffix}"
         if len(temp_name) > max_length:
-            temp_name = temp_name[:max_length]
+            raise ValueError("Base name is too long to generate a temporary snapshot name")
         self.logger.info(f"Generated temporary snapshot name: {temp_name}")
         return temp_name
 
@@ -83,20 +82,20 @@ class SnapshotManager:
         return self.devhub.query(query)
 
     def query_existing_active_snapshot(self, snapshot_name: str):
-        self.logger.info(
+        self.console.log(
             f"Checking for existing active snapshot with name: {snapshot_name}"
         )
         result = self.query(snapshot_name=snapshot_name, status=["Active"])
         if result["totalSize"] > 0:
-            self.existing_active_snapshot_id = result["records"][0]["Id"]
+            self.existing_active_snapshot = result["records"][0]
             self.logger.info(
-                f"Found existing active snapshot: {self.existing_active_snapshot_id}"
+                f"Found existing active snapshot: {self.existing_active_snapshot['Id']}"
             )
         else:
             self.logger.info(f"No active snapshot found with name {snapshot_name}")
 
     def query_and_delete_in_progress_snapshot(self, snapshot_name: str):
-        self.logger.info(
+        self.console.log(
             f"Checking for in-progress snapshot with name: {snapshot_name}"
         )
         result = self.query(snapshot_name=snapshot_name, status=["In Progress"])
@@ -169,8 +168,7 @@ class SnapshotManager:
                 )
 
             time.sleep(poll_interval)
-            elapsed = time.time() - start_time
-            progress.update(task, completed=min(int((elapsed / timeout) * 100), 100))
+            progress.update(task, advance=1)
             poll_interval = min(poll_interval * 1.5, 30)
 
         raise TimeoutError(
@@ -178,7 +176,8 @@ class SnapshotManager:
         )
 
     def delete_snapshot(self, snapshot_id: str = None):
-        snapshot_id = snapshot_id or self.existing_active_snapshot_id
+        if not snapshot_id and self.existing_active_snapshot:
+            snapshot_id = self.existing_active_snapshot["Id"]
         if snapshot_id:
             self.logger.info(f"Deleting snapshot: {snapshot_id}")
             self.devhub.OrgSnapshot.delete(snapshot_id)
@@ -190,8 +189,8 @@ class SnapshotManager:
         self.devhub.OrgSnapshot.update(snapshot_id, update_body)
         self.logger.info(f"Snapshot {snapshot_id} renamed to {new_name}")
 
-    def update_snapshot_from_org(
-        self, base_name: str, description: str, source_org: str, wait: bool = True
+    def create_snapshot_from_org(
+        self, base_name: str, description: str, source_org: str, wait: bool = True, update_existing: bool = True,
     ):
         with Progress(
             SpinnerColumn(),
@@ -201,17 +200,13 @@ class SnapshotManager:
             TimeElapsedColumn(),
             console=self.console,
         ) as progress:
-            task = progress.add_task("[green]Creating snapshot", total=100)
-
-            # Step 1: Generate temporary name (5% progress)
-            progress.update(
-                task, advance=5, description="[green]Generating temporary name"
-            )
             temp_name = self.generate_temp_name(base_name)
+            
+            task = progress.add_task("[green]Creating snapshot", total=100)
 
             # Step 2: Check for existing snapshots (10% progress)
             progress.update(
-                task, advance=5, description="[green]Checking for existing snapshots"
+                task, advance=10, description="[green]Checking for existing snapshots"
             )
             self.query_existing_active_snapshot(base_name)
             self.query_and_delete_in_progress_snapshot(temp_name)
@@ -234,8 +229,11 @@ class SnapshotManager:
             progress.update(task, advance=10, description="[green]Finalizing snapshot")
             self.delete_snapshot()  # Deletes the existing active snapshot if it exists
             self.rename_snapshot(snapshot_id, base_name)
+            
+            # Get the finalized snapshot
+            snapshot = self.devhub.OrgSnapshot.get(snapshot_id)
 
-        self.console.print(
+        self.console.log(
             Panel(
                 f"Snapshot {snapshot_id} created successfully!",
                 title="Snapshot Creation",

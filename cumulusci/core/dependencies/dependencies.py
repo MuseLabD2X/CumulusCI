@@ -3,7 +3,7 @@ import contextlib
 import itertools
 import logging
 import os
-from typing import List, Optional
+from typing import List, Optional, Union
 from zipfile import ZipFile
 
 import pydantic
@@ -432,6 +432,36 @@ class PackageNamespaceVersionDependency(StaticDependency):
     def package(self):
         return self.package_name or self.namespace or "Unknown Package"
 
+    def process_options(
+        self,
+        options: Optional[PackageInstallOptions] = None,
+        retry_options=None,
+    ) -> tuple[PackageInstallOptions, dict, str]:
+        if not options:
+            options = PackageInstallOptions()
+        if self.password_env_name:
+            options.password = os.environ.get(self.password_env_name)
+        if not retry_options:
+            retry_options = DEFAULT_PACKAGE_RETRY_OPTIONS
+        if "Beta" in self.version:
+            version_string = self.version.split(" ")[0]
+            beta = self.version.split(" ")[-1].strip(")")
+            version = f"{version_string}b{beta}"
+        else:
+            version = self.version
+        return options, retry_options, version
+
+    def get_package_install_tracking_data(
+        self,
+        options: Optional[PackageInstallOptions] = None,
+    ):
+        options, _, version = self.process_options(options)
+        options = options.dict()
+        options["namespace"] = self.namespace
+        options["version"] = version
+        del options["password"]
+        return options
+
     def install(
         self,
         context: BaseProjectConfig,
@@ -439,19 +469,7 @@ class PackageNamespaceVersionDependency(StaticDependency):
         options: Optional[PackageInstallOptions] = None,
         retry_options=None,
     ):
-        if not options:
-            options = PackageInstallOptions()
-        if self.password_env_name:
-            options.password = os.environ.get(self.password_env_name)
-        if not retry_options:
-            retry_options = DEFAULT_PACKAGE_RETRY_OPTIONS
-
-        if "Beta" in self.version:
-            version_string = self.version.split(" ")[0]
-            beta = self.version.split(" ")[-1].strip(")")
-            version = f"{version_string}b{beta}"
-        else:
-            version = self.version
+        options, retry_options, version = self.process_options(options, retry_options)
 
         if org.has_minimum_package_version(
             self.namespace,
@@ -494,6 +512,29 @@ class PackageVersionIdDependency(StaticDependency):
     def package(self):
         return self.package_name or "Unknown Package"
 
+    def process_options(
+        self,
+        options: Optional[PackageInstallOptions] = None,
+        retry_options=None,
+    ) -> tuple[PackageInstallOptions, dict]:
+        if not options:
+            options = PackageInstallOptions()
+        if self.password_env_name:
+            options.password = os.environ.get(self.password_env_name)
+        if not retry_options:
+            retry_options = DEFAULT_PACKAGE_RETRY_OPTIONS
+        return options, retry_options
+
+    def get_package_install_tracking_data(
+        self,
+        options: Optional[PackageInstallOptions] = None,
+    ):
+        options, _ = self.process_options(options)
+        options = options.dict()
+        options["version_id"] = self.version_id
+        del options["password"]
+        return options
+
     def install(
         self,
         context: BaseProjectConfig,
@@ -501,12 +542,7 @@ class PackageVersionIdDependency(StaticDependency):
         options: Optional[PackageInstallOptions] = None,
         retry_options=None,
     ):
-        if not options:
-            options = PackageInstallOptions()
-        if self.password_env_name:
-            options.password = os.environ.get(self.password_env_name)
-        if not retry_options:
-            retry_options = DEFAULT_PACKAGE_RETRY_OPTIONS
+        options, retry_options = self.process_options(options, retry_options)
 
         if any(
             self.version_id == v.id
@@ -543,6 +579,9 @@ class UnmanagedDependency(StaticDependency, abc.ABC):
     namespace_inject: Optional[str] = None
     namespace_strip: Optional[str] = None
     collision_check: Optional[bool] = None
+    hash: Optional[str] = None
+    size: Optional[int] = None
+    base64: Optional[str] = None
 
     def _get_unmanaged(self, org: OrgConfig):
         if self.unmanaged is None:
@@ -620,16 +659,23 @@ class UnmanagedDependency(StaticDependency, abc.ABC):
                 context=context,
             )
 
+        # Pre-calculate the hash, base64 encoded string, and size
+        self.hash = package_zip.as_hash()
+        self.base64 = package_zip.as_base64()
+        self.size = len(self.base64)
+        package_zip.as_hash = lambda: self.hash  # Monkeypatch to avoid re-hashing
+        package_zip.as_base64 = lambda: self.base64  # Monkeypatch to avoid re-encoding
+
         return package_zip
 
     def install(self, context: BaseProjectConfig, org: OrgConfig):
 
         context.logger.info(f"Deploying unmanaged metadata from {self.description}")
-
-        package_zip_builder = self.get_metadata_package_zip_builder(context, org)
+        # Initialize the package zip builder to set up self.hash and self.base64
+        _ = self.get_metadata_package_zip_builder(context, org)
+        # Initialize the ApiDeploy client to deploy the metadata
         task = TaskContext(org_config=org, project_config=context, logger=logger)
-        api = ApiDeploy(task, package_zip_builder.as_base64())
-
+        api = ApiDeploy(task, self.base64)
         return api()
 
 
@@ -667,6 +713,28 @@ class UnmanagedGitHubRefDependency(UnmanagedDependency):
             ref=self.ref,
         )
 
+    def get_deploy_tracking_data(self, project_config=None, org_config=None):
+        if not self.hash:
+            if not project_config:
+                raise ValueError(
+                    "project_config must be passed to get_deploy_tracking_data"
+                )
+            if not org_config:
+                raise ValueError(
+                    "org_config must be passed to get_deploy_tracking_data"
+                )
+            # If called outside of install, we need to build the package zip to set the hash
+            _ = self.get_metadata_package_zip_builder(project_config, org_config)
+        return dict(
+            subfolder=self.subfolder,
+            repo=self.github,
+            commit=self.ref,
+            branch=None,
+            tag=None,
+            hash=self.hash,
+            size=self.size,
+        )
+
     @property
     def name(self):
         subfolder = (
@@ -697,6 +765,23 @@ class UnmanagedZipURLDependency(UnmanagedDependency):
         # install() will take care of that for us.
 
         return download_extract_zip(self.zip_url)
+
+    def get_deploy_tracking_data(self, project_config=None):
+        if not self.hash:
+            if not project_config:
+                raise ValueError(
+                    "project_config must be passed to get_deploy_tracking_data"
+                )
+            # If called outside of install, we need to build the package zip to set the hash
+            package_zip_builder = self.get_metadata_package_zip_builder(
+                project_config, org_config
+            )
+        return dict(
+            url=self.url,
+            subfolder=self.subfolder,
+            hash=self.hash,
+            size=self.size,
+        )
 
     @property
     def name(self):
@@ -780,6 +865,24 @@ AVAILABLE_DEPENDENCY_CLASSES = [
     UnmanagedZipURLDependency,
     GitHubDynamicDependency,
     GitHubDynamicSubfolderDependency,
+]
+
+# Static and dynamic
+InputDependencyType = Union[
+    PackageVersionIdDependency,
+    PackageNamespaceVersionDependency,
+    UnmanagedGitHubRefDependency,
+    UnmanagedZipURLDependency,
+    GitHubDynamicDependency,
+    GitHubDynamicSubfolderDependency,
+]
+
+# Static only
+OutputDependencyType = Union[
+    PackageVersionIdDependency,
+    PackageNamespaceVersionDependency,
+    UnmanagedGitHubRefDependency,
+    UnmanagedZipURLDependency,
 ]
 
 

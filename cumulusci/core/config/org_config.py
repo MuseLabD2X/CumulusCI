@@ -10,10 +10,11 @@ from simple_salesforce import Salesforce
 from simple_salesforce.exceptions import SalesforceError, SalesforceResourceNotFound
 
 from cumulusci.core.config import BaseConfig
-from cumulusci.core.org_history import OrgHistory, actions_from_dict
+from cumulusci.core.org_history import FilterOrgActions, OrgHistory
 from cumulusci.core.exceptions import (
     CumulusCIException,
     DependencyResolutionError,
+    OrgHistoryError,
     ServiceNotConfigured,
 )
 from cumulusci.oauth.client import OAuth2Client, OAuth2ClientConfig
@@ -83,10 +84,30 @@ class OrgConfig(BaseConfig):
         self._installed_packages = None
         self._is_person_accounts_enabled = None
         self._multiple_currencies_is_enabled = False
-        actions = actions_from_dict(config.get("history", {}).get("actions", []))
-        self.history = OrgHistory.parse_obj({"actions": actions})
+        history_exception = None
+        # try:
+        config_history = config.get("history", {})
+        if config.get("org_id"):
+            config_history["org_id"] = config["org_id"]
+
+        self.history = OrgHistory.parse_obj(config_history)
+        # except Exception as e:
+        #     import pdb
+
+        #     pdb.set_trace()
+        #     history_exception = e
 
         super().__init__(config)
+
+        if history_exception:
+            if config.get("track_history", False):
+                self.logger.error(
+                    f"Failed to load history for org {name}: {history_exception}. Disabiling track_history to avoid data loss."
+                )
+            else:
+                raise OrgHistoryError(
+                    f"Failed to load history for org {name}: {history_exception}."
+                )
 
     def refresh_oauth_token(self, keychain, connected_app=None, is_sandbox=False):
         """Get a fresh access token and store it in the org config.
@@ -367,6 +388,8 @@ class OrgConfig(BaseConfig):
 
     def save(self):
         assert self.keychain, "Keychain was not set on OrgConfig"
+        if self.track_history and self.history:
+            self.config["history"] = self.history.dict()
         self.keychain.set_org(self, self.global_org)
 
     def get_domain(self):
@@ -599,34 +622,34 @@ class OrgConfig(BaseConfig):
         self.config["history"] = self.history.dict()
         self.save()
 
-    def clear_history(self, after: str = None, before: str = None, hash: str = None):
+    def clear_history(
+        self,
+        filters: FilterOrgActions,
+        org_id: str | None = None,
+    ):
         """Clear the org's history"""
-        print(f"Starting length: {len(self.history.actions)}")
+        self.logger.info(f"Starting length: {len(self.history.actions)}")
 
-        if hash:
-            # Find the index of the action with the matching hash
-            index = next(
-                (
-                    i
-                    for i, action in enumerate(self.history.actions)
-                    if action.hash_action == hash
-                ),
-                None,
-            )
-            if index is not None:
-                if after:
-                    # Exclude everything before the matching hash
-                    self.history.actions = self.history.actions[index:]
-                elif before:
-                    # Exclude everything after the matching hash
-                    self.history.actions = self.history.actions[:index]
-            else:
-                print(f"No action found with hash: {hash}")
+        if isinstance(filters, dict):
+            filters = FilterOrgActions.parse_obj(filters)
+
+        if org_id:
+            history = self.previous_orgs[org_id]
         else:
-            self.history.actions = []
+            history = self.history
 
+        actions = history.filtered_actions(filters)
+        for action in actions:
+            self.logger.warning(f"Removing {action.action_type} action: {action}")
+            history.actions.remove(action)
+
+        if org_id:
+            history.hash_config = history.calculate_config_hash()
         self.history.hash_config = self.history.calculate_config_hash()
+        self.logger.info(
+            f"Recalculated history config hash: {self.history.hash_config}"
+        )
 
-        print(f"Ending length: {len(self.history.actions)}")
+        self.logger.info(f"Ending length: {len(self.history.actions)}")
         self.config["history"] = self.history.dict()
         self.save()

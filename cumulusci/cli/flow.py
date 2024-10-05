@@ -233,6 +233,7 @@ def flow_run(
                 )
 
     # Create the flow and handle initialization exceptions
+    coordinator = None
     try:
         coordinator = runtime.get_flow(
             flow_name,
@@ -247,7 +248,7 @@ def flow_run(
         click.echo(f"Ran {flow_name} in {format_duration(duration)}")
         org_config.add_action_to_history(coordinator.action)
     except Exception as e:
-        if coordinator.action:
+        if coordinator and coordinator.action:
             org_config.add_action_to_history(coordinator.action)
         runtime.alert(f"Flow error: {flow_name}")
         raise
