@@ -42,7 +42,7 @@ from cumulusci.core.exceptions import (
     TaskRequiresSalesforceOrg,
 )
 from cumulusci.core.flowrunner import FlowCoordinator, StepSpec, StepVersion
-from cumulusci.salesforce_api.package_install import PackageInstallOptions
+from cumulusci.salesforce_api.package_models import PackageInstallOptions
 from cumulusci.utils import cd
 from cumulusci.utils.logging import redirect_output_to_logger
 from cumulusci.utils.metaprogramming import classproperty

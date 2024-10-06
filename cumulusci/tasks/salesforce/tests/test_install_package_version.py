@@ -9,7 +9,7 @@ from cumulusci.core.dependencies.dependencies import (
 from cumulusci.core.dependencies.resolvers import get_resolver_stack
 from cumulusci.core.exceptions import CumulusCIException, TaskOptionsError
 from cumulusci.core.flowrunner import StepSpec
-from cumulusci.salesforce_api.package_install import (
+from cumulusci.salesforce_api.package_models import (
     DEFAULT_PACKAGE_RETRY_OPTIONS,
     PackageInstallOptions,
 )

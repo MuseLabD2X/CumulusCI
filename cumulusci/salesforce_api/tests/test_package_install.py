@@ -10,13 +10,15 @@ from cumulusci.core.dependencies.utils import TaskContext
 from cumulusci.core.exceptions import PackageInstallError
 from cumulusci.salesforce_api.exceptions import MetadataApiError
 from cumulusci.salesforce_api.package_install import (
+    install_package_by_namespace_version,
+    install_package_by_version_id,
+)
+from cumulusci.salesforce_api.package_models import (
     ApexCompileType,
     NameConflictResolution,
     PackageInstallOptions,
     SecurityType,
     UpgradeType,
-    install_package_by_namespace_version,
-    install_package_by_version_id,
 )
 from cumulusci.tests.util import CURRENT_SF_API_VERSION, create_project_config
 

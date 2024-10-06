@@ -27,10 +27,12 @@ from cumulusci.core.sfdx import (
 )
 from cumulusci.salesforce_api.metadata import ApiDeploy
 from cumulusci.salesforce_api.package_install import (
-    DEFAULT_PACKAGE_RETRY_OPTIONS,
-    PackageInstallOptions,
     install_package_by_namespace_version,
     install_package_by_version_id,
+)
+from cumulusci.salesforce_api.package_models import (
+    DEFAULT_PACKAGE_RETRY_OPTIONS,
+    PackageInstallOptions,
 )
 from cumulusci.salesforce_api.package_zip import MetadataPackageZipBuilder
 from cumulusci.utils import (

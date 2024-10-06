@@ -9,6 +9,20 @@ from cumulusci.utils.yaml.model_parser import CCIModel
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_PACKAGE_RETRY_OPTIONS = {
+    "retries": 20,
+    "retry_interval": 5,
+    "retry_interval_add": 30,
+}
+
+RETRY_PACKAGE_ERRORS = [
+    "This package is not yet available",
+    "InstalledPackage version number",
+    "The requested package doesn't yet exist or has been deleted",
+    "unable to obtain exclusive access to this record",
+    "invalid cross reference id",
+]
+
 
 class SecurityType(StrEnum):
     """Enum used to specify the component permissioning mode for a package install.

@@ -11,7 +11,10 @@ from cumulusci.core.dependencies.utils import TaskContext
 from cumulusci.core.exceptions import PackageInstallError
 from cumulusci.salesforce_api.exceptions import MetadataApiError
 from cumulusci.salesforce_api.metadata import ApiDeploy
-from cumulusci.salesforce_api.package_models import PackageInstallOptions
+from cumulusci.salesforce_api.package_models import (
+    PackageInstallOptions,
+    RETRY_PACKAGE_ERRORS,
+)
 from cumulusci.salesforce_api.package_zip import InstallPackageZipBuilder
 from cumulusci.salesforce_api.utils import get_simple_salesforce_connection
 from cumulusci.utils.waiting import poll, retry
@@ -37,20 +40,6 @@ PACKAGE_INSTALL_TASK_OPTIONS = {
         "description": "For Unlocked Package upgrades only, whether to deprecate removed components (`deprecate-only`), delete them (`delete-only`), or delete and deprecate based on safety (`mixed`). `mixed` is the default behavior."
     },
 }
-
-DEFAULT_PACKAGE_RETRY_OPTIONS = {
-    "retries": 20,
-    "retry_interval": 5,
-    "retry_interval_add": 30,
-}
-
-RETRY_PACKAGE_ERRORS = [
-    "This package is not yet available",
-    "InstalledPackage version number",
-    "The requested package doesn't yet exist or has been deleted",
-    "unable to obtain exclusive access to this record",
-    "invalid cross reference id",
-]
 
 
 def _wait_for_package_install(tooling, request):

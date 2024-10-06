@@ -11,8 +11,10 @@ from cumulusci.core.exceptions import CumulusCIException, TaskOptionsError
 from cumulusci.core.github import find_previous_release
 from cumulusci.core.utils import process_bool_arg
 from cumulusci.salesforce_api.package_install import (
-    DEFAULT_PACKAGE_RETRY_OPTIONS,
     PACKAGE_INSTALL_TASK_OPTIONS,
+)
+from cumulusci.salesforce_api.package_models import (
+    DEFAULT_PACKAGE_RETRY_OPTIONS,
     SecurityType,
 )
 from cumulusci.tasks.salesforce.BaseSalesforceApiTask import BaseSalesforceApiTask

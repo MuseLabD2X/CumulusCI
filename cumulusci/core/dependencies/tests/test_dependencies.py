@@ -25,7 +25,7 @@ from cumulusci.core.dependencies.resolvers import (
     DependencyResolutionStrategy,
 )
 from cumulusci.core.exceptions import DependencyResolutionError
-from cumulusci.salesforce_api.package_install import (
+from cumulusci.salesforce_api.package_models import (
     DEFAULT_PACKAGE_RETRY_OPTIONS,
     PackageInstallOptions,
 )
