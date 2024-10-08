@@ -21,6 +21,7 @@ from cumulusci.core.utils import process_bool_arg, process_list_arg
 from cumulusci.salesforce_api.snapshot import (
     SnapshotManager,
     SnapshotNameValidator,
+    SnapshotUX,
 )
 from cumulusci.tasks.salesforce import BaseSalesforceApiTask
 from cumulusci.tasks.devhub import BaseDevhubTask
@@ -283,6 +284,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceApiTask):
             else None
         )
         self.start_time = self._format_datetime(self._get_current_time())
+        self.snapshots = self._init_snapshots()
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
@@ -330,12 +332,14 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceApiTask):
             ),
         }
 
-    def _run_task(self):
-        previous_handlers = self.logger.handlers
-        self.logger.addHandler(RichHandler())
-
-        skip_reason = self._should_create_snapshot()
+    def _init_snapshots(self) -> SnapshotUX:
+        """Initializes a SnapshotManager and SnapshotUX instance."""
         snapshot_manager = SnapshotManager(self.devhub, self.logger)
+        return SnapshotUX(snapshot_manager)
+
+    def _run_task(self):
+        skip_reason = self._should_create_snapshot()
+
         if skip_reason and skip_reason is not True:
             # self.logger.info(f"Skipping snapshot creation: {skip_reason}")
             # if self.parsed_options.snapshot_id:
@@ -361,19 +365,26 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceApiTask):
                 )
                 return
 
-        self.logger.info("Starting scratch org snapshot creation")
+        if self.parsed_options.snapshot_id:
+            self.logger.info(
+                "Finalizing scratch org snapshot creation for {}".format(
+                    self.parsed_options.snapshot_id
+                )
+            )
+        else:
+            self.logger.info("Starting scratch org snapshot creation")
         snapshot_name = self._generate_snapshot_name()
         description = self._generate_snapshot_description()
 
         try:
             if self.parsed_options.snapshot_id:
-                snapshot = snapshot_manager.finalize_temp_snapshot(
+                snapshot = self.snapshots.finalize_temp_snapshot(
                     snapshot_name=snapshot_name,
                     description=description,
                     snapshot_id=self.parsed_options.snapshot_id,
                 )
             else:
-                snapshot = snapshot_manager.create_snapshot_from_org(
+                snapshot = self.snapshots.create_snapshot(
                     base_name=snapshot_name,
                     description=description,
                     source_org=self.org_config.org_id,
@@ -411,8 +422,6 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceApiTask):
             )
         if self.is_github_job and self.parsed_options.github_environment_prefix:
             self._create_github_environment(snapshot_name)
-
-        self.logger.handlers = previous_handlers
 
     def _should_create_snapshot(self):
         return True
@@ -680,7 +689,7 @@ class CreateHashedSnapshot(BaseCreateOrgSnapshot):
     def _init_task(self):
         super()._init_task()
 
-        self.snapshots = SnapshotManager(self.devhub, self.logger)
+        # Use the snapshot manager to query for an existing active snapshot
         if self._should_create_snapshot() is not True:
             self.parsed_options.snapshot_id = self.snapshots.existing_active_snapshot[
                 "Id"

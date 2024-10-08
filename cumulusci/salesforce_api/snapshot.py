@@ -1,25 +1,23 @@
+import os
 import time
 from typing import Optional
+from datetime import datetime, timedelta
+from pydantic import BaseModel, validator
+from rich.console import Console
+from rich.layout import Layout
+from rich.live import Live
+from rich.markup import escape
+from rich.panel import Panel
+from rich.progress import Progress, SpinnerColumn, BarColumn, TextColumn, TimeElapsedColumn
+from rich.table import Table
+from rich.text import Text
+from simple_salesforce.exceptions import SalesforceResourceNotFound
 from cumulusci.core.exceptions import (
     SalesforceException,
     ScratchOrgSnapshotError,
     ScratchOrgSnapshotFailure,
 )
-
-from cumulusci.utils.options import (
-    Field,
-)
-from pydantic import BaseModel, validator
-from simple_salesforce.exceptions import SalesforceResourceNotFound
-from rich.console import Console
-from rich.panel import Panel
-from rich.progress import (
-    Progress,
-    SpinnerColumn,
-    TextColumn,
-    BarColumn,
-    TimeElapsedColumn,
-)
+from cumulusci.utils.options import Field
 
 ORG_SNAPSHOT_FIELDS = [
     "Id",
@@ -32,7 +30,6 @@ ORG_SNAPSHOT_FIELDS = [
     "ExpirationDate",
     "Error",
 ]
-
 
 class SnapshotNameValidator(BaseModel):
     base_name: str = Field(..., max_length=15)
@@ -53,7 +50,6 @@ class SnapshotManager:
         self.temp_suffix = temp_suffix
         self.existing_active_snapshot: dict | None = None
         self.temporary_snapshot_name = None
-        self.console = Console()
 
     def generate_temp_name(self, base_name: str, max_length: int = 15) -> str:
         temp_name = f"{base_name}{self.temp_suffix}"
@@ -68,51 +64,46 @@ class SnapshotManager:
         snapshot_name: Optional[str] = None,
         description: Optional[str] = None,
         status: Optional[list] = None,
+        limit: Optional[int] = None,
     ):
-        query = f"SELECT {', '.join(ORG_SNAPSHOT_FIELDS)} FROM OrgSnapshot WHERE SnapshotName = '{snapshot_name}'"
-        where = []
+        query = f"SELECT {', '.join(ORG_SNAPSHOT_FIELDS)} FROM OrgSnapshot"
+        where_clauses = []
         if snapshot_id:
-            where.append(f"Id = '{snapshot_id}'")
+            where_clauses.append(f"Id = '{snapshot_id}'")
         if snapshot_name:
-            where.append(f"SnapshotName = '{snapshot_name}'")
+            where_clauses.append(f"SnapshotName = '{snapshot_name}'")
         if description:
-            where.append(f"Description LIKE '{description}'")
+            where_clauses.append(f"Description LIKE '{description}'")
         if status:
-            where.append(f"Status IN ({', '.join([f'\'{s}\'' for s in status])})")
+            where_clauses.append(f"Status IN ({', '.join([f'\'{s}\'' for s in status])})")
+        
+        if where_clauses:
+            query += " WHERE " + " AND ".join(where_clauses)
+        
+        if limit:
+            query += f" LIMIT {limit}"
+        
         return self.devhub.query(query)
 
     def query_existing_active_snapshot(self, snapshot_name: str):
-        self.console.log(
-            f"Checking for existing active snapshot with name: {snapshot_name}"
-        )
         result = self.query(snapshot_name=snapshot_name, status=["Active"])
         if result["totalSize"] > 0:
             self.existing_active_snapshot = result["records"][0]
-            self.logger.info(
-                f"Found existing active snapshot: {self.existing_active_snapshot['Id']}"
-            )
+            self.logger.info(f"Found existing active snapshot: {self.existing_active_snapshot['Id']}")
         else:
             self.logger.info(f"No active snapshot found with name {snapshot_name}")
 
     def query_and_delete_in_progress_snapshot(self, snapshot_name: str):
-        self.console.log(
-            f"Checking for in-progress snapshot with name: {snapshot_name}"
-        )
         result = self.query(snapshot_name=snapshot_name, status=["In Progress"])
-
         if result["totalSize"] > 0:
             snapshot_id = result["records"][0]["Id"]
-            self.logger.info(
-                f"Found in-progress snapshot {snapshot_id}, deleting it..."
-            )
+            self.logger.info(f"Found in-progress snapshot {snapshot_id}, deleting it...")
             self.devhub.OrgSnapshot.delete(snapshot_id)
             self.logger.info(f"Deleted in-progress snapshot: {snapshot_id}")
         else:
             self.logger.info(f"No in-progress snapshot found with name {snapshot_name}")
 
-    def create_org_snapshot(
-        self, snapshot_name: str, description: str, source_org: str
-    ):
+    def create_org_snapshot(self, snapshot_name: str, description: str, source_org: str):
         self.logger.info(f"Creating new org snapshot: {snapshot_name}")
         snapshot_body = {
             "Description": description,
@@ -132,49 +123,6 @@ class SnapshotManager:
                 ) from e
             raise
 
-    def poll_for_completion(
-        self,
-        snapshot_id: str,
-        progress,
-        task,
-        timeout: int = 1200,
-        initial_poll_interval: int = 10,
-    ):
-        poll_interval = initial_poll_interval
-        start_time = time.time()
-        end_time = start_time + timeout
-
-        while time.time() < end_time:
-            # try:
-            #     snapshot = self.devhub.OrgSnapshot.get(snapshot_id)
-            # except SalesforceResourceNotFound as exc:
-            #     raise ScratchOrgSnapshotFailure(
-            #         "Snapshot not found. This usually happens because another build deleted the snapshot while it was being built."
-            #     ) from exc
-
-            status = snapshot.get("Status")
-            progress.update(
-                task, description=f"[cyan]Creating snapshot... Status: {status}"
-            )
-
-            if status == "Active":
-                progress.update(task, completed=100)
-                self.logger.info(f"Snapshot {snapshot_id} completed successfully.")
-                return snapshot
-            if status == "Error":
-                progress.update(task, completed=100)
-                raise ScratchOrgSnapshotFailure(
-                    f"Snapshot {snapshot_id} failed to complete. Error: {snapshot.get('Error')}"
-                )
-
-            time.sleep(poll_interval)
-            progress.update(task, advance=1)
-            poll_interval = min(poll_interval * 1.5, 30)
-
-        raise TimeoutError(
-            f"Snapshot {snapshot_id} did not complete within {timeout} seconds."
-        )
-
     def delete_snapshot(self, snapshot_id: str = None):
         if not snapshot_id and self.existing_active_snapshot:
             snapshot_id = self.existing_active_snapshot["Id"]
@@ -189,87 +137,234 @@ class SnapshotManager:
         self.devhub.OrgSnapshot.update(snapshot_id, update_body)
         self.logger.info(f"Snapshot {snapshot_id} renamed to {new_name}")
 
-    def create_snapshot_from_org(
-        self, base_name: str, description: str, source_org: str, wait: bool = True, update_existing: bool = True,
-    ):
-        with Progress(
+class SnapshotUX:
+    def __init__(self, snapshot_manager):
+        self.snapshots = snapshot_manager
+        self.console = Console()
+        self.layout = Layout()
+        self.log_panel = Panel("", title="Log Output", border_style="cyan", expand=True)
+        self.progress = Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
             BarColumn(),
             TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
             TimeElapsedColumn(),
-            console=self.console,
-        ) as progress:
-            temp_name = self.generate_temp_name(base_name)
-            
-            task = progress.add_task("[green]Creating snapshot", total=100)
+        )
+        self.overall_progress = self.progress.add_task("[cyan]Overall Progress", total=100)
+        self.snapshot_info_panel = Panel("", title="Snapshot Info", border_style="yellow")
+        self.setup_layout()
+        self.log_messages = []
+        self.estimated_completion_time = None
+        self.is_ci_environment = self.detect_ci_environment()
 
-            # Step 2: Check for existing snapshots (10% progress)
-            progress.update(
-                task, advance=10, description="[green]Checking for existing snapshots"
-            )
-            self.query_existing_active_snapshot(base_name)
-            self.query_and_delete_in_progress_snapshot(temp_name)
+    def detect_ci_environment(self):
+        # Check for common CI environment variables
+        return any(env_var in os.environ for env_var in ['CI', 'GITHUB_ACTIONS', 'GITLAB_CI', 'JENKINS_URL'])
 
-            # Step 3: Create new snapshot (10% progress)
-            progress.update(
-                task, advance=10, description="[green]Creating new snapshot"
-            )
-            snapshot_id = "123" #self.create_org_snapshot(temp_name, description, source_org)
+    def setup_layout(self):
+        self.layout.split_column(
+            Layout(Panel(self.progress, title="Snapshot Progress", border_style="green"), name="progress", ratio=1),
+            Layout(self.snapshot_info_panel, name="info", ratio=1),
+            Layout(self.log_panel, name="log", ratio=2),
+        )
+
+    def log(self, message, style: str = "" ):
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        self.log_messages.append(message)
+        
+        # Use Text object with markup enabled to render the log panel
+        log_text = Text("\n".join(self.log_messages[-15:]))
+        log_text.highlight_words([timestamp for entry in self.log_messages[-15:] for timestamp in [entry.split()[0]]], "dim")
+        log_text.highlight_words(["ERROR", "Error", "Failed", "FAILURE"], "bold red")
+        log_text.highlight_words(["WARNING", "Warning"], "bold yellow")
+        log_text.highlight_words(["Complete", "complete", "Press any key to continue..."], "bold green")
+        self.log_panel.renderable = log_text
+
+        if self.is_ci_environment:
+            self.console.print(log_entry, markup=True)  # Print for CI environments with markup
+
+    def update_snapshot_info(self, snapshot):
+        if snapshot:
+            table = Table(show_header=False, expand=True)
+            table.add_column("Property", style="cyan")
+            table.add_column("Value", style="yellow")
+            for field in ["Id", "SnapshotName", "Status", "SourceOrg", "CreatedDate", "LastModifiedDate"]:
+                table.add_row(field, str(snapshot.get(field, "N/A")))
+            self.snapshot_info_panel.renderable = table
+        else:
+            self.snapshot_info_panel.renderable = "No snapshot data available"
+
+    def create_snapshot(self, base_name: str, description: str, source_org: str, wait: bool = True, update_existing: bool = True):
+        with Live(self.layout, console=self.console, screen=not self.is_ci_environment, refresh_per_second=4) as live:
+            self.log(f"Starting snapshot creation for {base_name}")
+            self.estimate_completion_time()
+
+            # Check for existing snapshots
+            self.progress.update(self.overall_progress, advance=10, description="Checking existing snapshots")
+            self.snapshots.query_existing_active_snapshot(base_name)
+            if self.snapshots.existing_active_snapshot:
+                self.log(f"Found existing active snapshot: {self.snapshots.existing_active_snapshot['Id']}")
+                self.update_snapshot_info(self.snapshots.existing_active_snapshot)
+            else:
+                self.log("No existing active snapshot found")
+
+            temp_name = self.snapshots.generate_temp_name(base_name)
+            self.log(f"Generated temporary name: {temp_name}")
+            self.snapshots.query_and_delete_in_progress_snapshot(temp_name)
+            self.log("Existing snapshot check complete")
+
+            # Create new snapshot
+            self.progress.update(self.overall_progress, advance=10, description="Creating new snapshot")
+            snapshot_id = self.snapshots.create_org_snapshot(temp_name, description, source_org)
+            self.log(f"New snapshot created with ID: {snapshot_id}")
 
             if not wait:
-                snapshot = self.devhub.OrgSnapshot.get(snapshot_id)
-                return snapshot
+                self.log("Asynchronous operation requested. Returning snapshot ID.")
+                return self.snapshots.devhub.OrgSnapshot.get(snapshot_id)
 
-            # Step 4: Wait for snapshot to complete (60% progress)
-            progress.update(task, description="[green]Waiting for snapshot to complete")
-            snapshot = self.poll_for_completion(snapshot_id, progress, task)
+            # Poll for completion
+            self.progress.update(self.overall_progress, description="Waiting for snapshot to complete")
+            snapshot = self.poll_for_completion(snapshot_id, live)
 
-            # Step 5: Finalize snapshot (10% progress)
-            progress.update(task, advance=10, description="[green]Finalizing snapshot")
-            self.delete_snapshot()  # Deletes the existing active snapshot if it exists
-            self.rename_snapshot(snapshot_id, base_name)
+            # Finalize snapshot
+            if snapshot["Status"] == "Active":
+                self.make_snapshot_active(
+                    snapshot_id=snapshot_id,
+                    snapshot_name=base_name,
+                    update_existing=update_existing,
+                )
+
+            self.progress.update(self.overall_progress, advance=10, description="Complete")
+            self.log("Snapshot creation complete!")
             
-            # Get the finalized snapshot
-            snapshot = self.devhub.OrgSnapshot.get(snapshot_id)
+            # Add a pause here
+            self.pause_display(live)
 
-        self.console.log(
-            Panel(
-                f"Snapshot {snapshot_id} created successfully!",
-                title="Snapshot Creation",
-                border_style="green",
-            )
-        )
-        self.logger.info(f"Snapshot management complete for {snapshot_id}")
         return snapshot
+   
+    def make_snapshot_active(self, snapshot_id: str, snapshot_name: str, update_existing: bool = True): 
+        # Finalize snapshot creation by deleting the current active snapshot and renaming the new snapshot
+        self.progress.update(self.overall_progress, advance=10, description="Finalizing snapshot")
+        if update_existing:
+            if self.snapshots.existing_active_snapshot:
+                if self.snapshots.existing_active_snapshot["Id"] == snapshot_id:
+                    self.log("Snapshot is already active, skipping rename")
+                else:
+                    self.snapshots.delete_snapshot(self.snapshots.existing_active_snapshot["Id"])
+                    self.log(f"Deleted existing active snapshot with ID {self.snapshots.existing_active_snapshot['Id']}")   
+                    self.snapshots.rename_snapshot(snapshot_id, base_name)
+                    self.log(f"Snapshot {snapshot_id} finalized and renamed to {base_name}")
+                        
+                        
+    def pause_display(self, live, timeout=30):
+        if self.is_ci_environment:
+            return  # Don't pause in CI environment
 
-    def finalize_temp_snapshot(
-        self, snapshot_name: str, description: str, snapshot_id: str
-    ):
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
-            TimeElapsedColumn(),
-            console=self.console,
-        ) as progress:
-            task = progress.add_task("[green]Creating snapshot", total=100)
+        self.log(f"Process completed. Display will timeout in {timeout} seconds. Press any key to continue...", style="bold green")
+        
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.key_pressed():
+                break
+            time.sleep(0.1)
+            live.refresh()
 
-            # Step 1: Check for existing snapshots (10% progress)
-            progress.update(
-                task,
-                advance=10,
-                description=f"[green]Checking for existing active snapshot named {snapshot_name}",
-            )
-            self.query_existing_active_snapshot(snapshot_name)
+    def key_pressed(self):
+        # This is a simple cross-platform way to check for a keypress
+        if os.name == 'nt':  # For Windows
+            import msvcrt
+            return msvcrt.kbhit()
+        else:  # For Unix-based systems
+            import select
+            import sys
+            return select.select([sys.stdin], [], [], 0) == ([sys.stdin], [], [])
 
-            # Step 2: Wait for snapshot to complete (60% progress)
-            progress.update(task, description="[green]Waiting for snapshot to complete")
-            snapshot = self.poll_for_completion(snapshot_id, progress, task)
 
-            # Step 3: Finalize snapshot (30% progress)
-            progress.update(task, advance=30, description="[green]Finalizing snapshot")
-            self.delete_snapshot()
-            self.rename_snapshot(snapshot_id, snapshot_name)
-            return snapshot
+    def poll_for_completion(self, snapshot_id: str, live, timeout: int = 1200, initial_poll_interval: int = 10):
+        start_time = datetime.now()
+        end_time = start_time + timedelta(seconds=timeout)
+        poll_interval = initial_poll_interval
+
+        while datetime.now() < end_time:
+            try:
+                snapshot = self.snapshots.devhub.OrgSnapshot.get(snapshot_id)
+                self.update_snapshot_info(snapshot)
+            except Exception as e:
+                self.log(f"Error retrieving snapshot: {str(e)}")
+                raise
+
+            status = snapshot.get("Status")
+            self.log(f"Current status: {status}")
+
+            if status == "Active":
+                self.progress.update(self.overall_progress, advance=60, description="Snapshot complete")
+                return snapshot
+            elif status == "Error":
+                error_msg = f"Snapshot failed: {snapshot.get('Error')}"
+                self.log(f"Error: {error_msg}")
+                raise Exception(error_msg)
+
+            elapsed_time = (datetime.now() - start_time).total_seconds()
+            if self.estimated_completion_time:
+                progress = min(60, int(60 * elapsed_time / (self.estimated_completion_time - start_time).total_seconds()))
+                self.progress.update(self.overall_progress, completed=20 + progress)
+
+            live.refresh()
+            time.sleep(poll_interval)
+            poll_interval = min(poll_interval * 1.5, 30)
+
+        raise TimeoutError(f"Snapshot {snapshot_id} did not complete within {timeout} seconds.")
+
+    def estimate_completion_time(self):
+        recent_snapshots = self.snapshots.query(status=["Active"], limit=5)
+        if recent_snapshots["totalSize"] > 0:
+            total_time = sum((s["LastModifiedDate"] - s["CreatedDate"]).total_seconds() for s in recent_snapshots["records"])
+            avg_time = total_time / recent_snapshots["totalSize"]
+            self.estimated_completion_time = datetime.now() + timedelta(seconds=avg_time)
+            self.log(f"Estimated completion time: {self.estimated_completion_time.strftime('%H:%M:%S')}")
+        else:
+            self.log("Unable to estimate completion time")
+
+    def finalize_temp_snapshot(self, snapshot_name: str, description: str, snapshot_id: str, update_existing: bool = True):
+        with Live(self.layout, console=self.console, screen=True, refresh_per_second=4) as live:
+            self.log(f"Finalizing temporary snapshot {snapshot_id} to {snapshot_name}")
+
+            # Check for existing snapshots
+            self.progress.update(self.overall_progress, advance=10, description="Checking existing snapshots")
+            self.snapshots.query_existing_active_snapshot(snapshot_name)
+            self.log("Existing snapshot check complete")
+
+            # Poll for completion
+            self.progress.update(self.overall_progress, description="Waiting for snapshot to complete")
+            snapshot = self.poll_for_completion(snapshot_id, live)
+
+            # Finalize snapshot
+            self.progress.update(self.overall_progress, advance=30, description="Finalizing snapshot")
+            # Finalize snapshot
+            if snapshot["Status"] == "Active":
+                self.make_snapshot_active(
+                    snapshot_id=snapshot_id,
+                    snapshot_name=snapshot_name,
+                    update_existing=update_existing,
+                )
+
+            self.progress.update(self.overall_progress, description="Complete")
+            self.log("Snapshot finalization complete!")
+
+            # Add a pause here
+            self.pause_display(live)
+        return snapshot
+    
+    # Passthrough properties and methods
+    @property
+    def existing_active_snapshot(self):
+        return self.snapshots.existing_active_snapshot
+    
+    def query(self, *args, **kwargs):
+        return self.snapshots.query(*args, **kwargs)
+    
+    def query_existing_active_snapshot(self, *args, **kwargs):
+        return self.snapshots.query_existing_active_snapshot(*args, **kwargs)
+    
+    def delete_snapshot(self, *args, **kwargs):
+        return self.snapshots.delete_snapshot(*args, **kwargs)
