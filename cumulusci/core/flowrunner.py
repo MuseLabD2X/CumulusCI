@@ -77,6 +77,7 @@ from cumulusci.core.org_history import (
     FlowOrgAction,
     FlowActionStep,
     FlowActionTracker,
+    TaskActionTracker,
     TaskOrgAction,
 )
 
@@ -180,6 +181,40 @@ class StepSpec:
         )
 
 
+class StepPrediction(NamedTuple):
+    step_num: StepVersion
+    task_name: str
+    task_config: dict
+    task_class: Optional[
+        Type["BaseTask"]
+    ]  # None means this step was skipped by setting task: None
+    allow_failure: bool
+    path: str
+    skip: bool
+    skip_steps: List[str]
+    skip_from: str
+    start_from: str
+    when: Optional[str]
+    tracker: TaskActionTracker
+
+    @classmethod
+    def from_step(cls, step: StepSpec, tracker: TaskActionTracker):
+        return cls(
+            step.step_num,
+            step.task_name,
+            step.task_config,
+            step.task_class,
+            step.allow_failure,
+            step.path,
+            step.skip,
+            step.skip_steps,
+            step.skip_from,
+            step.start_from,
+            step.when,
+            tracker,
+        )
+
+
 class StepResult(NamedTuple):
     step_num: StepVersion
     task_name: str
@@ -273,11 +308,11 @@ class TaskRunner:
     def from_flow(cls, flow: "FlowCoordinator", step: StepSpec) -> "TaskRunner":
         return cls(step, flow.org_config, flow=flow)
 
-    def run_step(self, **options) -> StepResult:
+    def _init_task(self, **options) -> "BaseTask":
         """
-        Run a step.
+        Initialize a task.
 
-        :return: StepResult
+        :return: BaseTask
         """
 
         # Resolve ^^task_name.return_value style option syntax
@@ -290,7 +325,7 @@ class TaskRunner:
 
         assert self.step.task_class
 
-        task = self.step.task_class(
+        return self.step.task_class(
             self.step.project_config,
             TaskConfig(task_config),
             org_config=self.org_config,
@@ -298,6 +333,27 @@ class TaskRunner:
             stepnum=self.step.step_num,
             flow=self.flow,
         )
+
+    def predict_step(self, **options) -> "StepPrediction":
+        """
+        Predict a step.
+
+        :return: StepResult
+        """
+        task = self._init_task(**options)
+        tracker = task(predict=True)
+        return StepPrediction.from_step(
+            self.step,
+            tracker,
+        )
+
+    def run_step(self, **options) -> StepResult:
+        """
+        Run a step.
+
+        :return: StepResult
+        """
+        task = self._init_task(**options)
         self._log_options(task)
         exc = None
         try:
@@ -351,6 +407,7 @@ class FlowCoordinator:
     results: List[StepResult]
     tracker: FlowActionTracker
     action: FlowOrgAction | None
+    use_snapshots: bool = False
 
     def __init__(
         self,
@@ -574,11 +631,56 @@ class FlowCoordinator:
         finally:
             self.callbacks.post_flow(self)
 
-    def _run_step(self, step: StepSpec):
+    def predict(self, org_config: OrgConfig) -> List[StepPrediction]:
+        self.org_config = org_config
+        line = f"Initializing flow for prediction only: {self.__class__.__name__}"
+        if self.name:
+            line = f"{line} ({self.name})"
+        self._rule()
+        self.logger.info(line)
+        self.logger.info(self.flow_config.description)
+        self._rule(new_line=True)
+
+        # self._init_org()
+
+        # Give pre_flow callback a chance to alter the steps
+        # based on the state of the org before we display the steps.
+        self.callbacks.pre_flow(self)
+
+        self._rule(fill="-")
+        self.logger.info("Steps:")
+        for line in self.get_summary().splitlines():
+            self.logger.info(line)
+        self._rule(fill="-", new_line=True)
+
+        self.logger.info("Starting prediction")
+        self._rule(new_line=True)
+
+        predictions = []
+        try:
+            for step in self.steps:
+                prediction = self._run_step(step, predict=True)
+                predictions.append(prediction)
+            flow_name = f"'{self.name}' " if self.name else ""
+            self.logger.info(
+                f"Completed flow {flow_name} prediction for org {org_config.name} successfully!"
+            )
+            return predictions
+        except Exception as e:
+            raise e from e
+        finally:
+            self.callbacks.post_flow(self)
+
+    def _run_step(self, step: StepSpec, predict: bool = False):
         if step.skip:
             self._rule(fill="*")
             self.logger.info(f"Skipping task: {step.task_name}")
             self._rule(fill="*", new_line=True)
+            if predict:
+                return StepPrediction.from_step(
+                    step,
+                    tracker=None,
+                )
             return
 
         if step.when:
@@ -592,18 +694,36 @@ class FlowCoordinator:
                 self.logger.info(
                     f"Skipping task {step.task_name} (skipped unless {step.when})"
                 )
+                if predict:
+                    step.skip = True
+                    return StepPrediction.from_step(
+                        step,
+                        tracker=None,
+                    )
                 return
 
         self._rule(fill="-")
-        self.logger.info(f"Running task: {step.task_name}")
+        if predict:
+            self.logger.info(f"Predicting task: {step.task_name}")
+        else:
+            self.logger.info(f"Running task: {step.task_name}")
         self._rule(fill="-", new_line=True)
 
         self.callbacks.pre_task(step)
-        result = TaskRunner.from_flow(self, step).run_step()
-        self.callbacks.post_task(step, result)
-        self.results.append(
-            result
-        )  # add even a failed result to the result set for the post flow
+        if predict:
+            prediction = TaskRunner.from_flow(self, step).predict_step()
+            if not prediction:
+                return StepPrediction.from_step(
+                    step,
+                    tracker=None,
+                )
+            return prediction
+        else:
+            result = TaskRunner.from_flow(self, step).run_step()
+            self.callbacks.post_task(step, result)
+            self.results.append(
+                result
+            )  # add even a failed result to the result set for the post flow
 
         if result.exception and not step.allow_failure:
             raise result.exception  # PY3: raise an exception type we control *from* this exception instead?

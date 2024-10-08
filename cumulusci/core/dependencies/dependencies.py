@@ -145,7 +145,12 @@ class StaticDependency(Dependency, abc.ABC):
     are already both resolved and flattened)."""
 
     @abc.abstractmethod
-    def install(self, org_config: OrgConfig, retry_options: Optional[dict] = None):
+    def install(
+        self,
+        org_config: OrgConfig,
+        retry_options: Optional[dict] = None,
+        predict: bool = False,
+    ):
         pass
 
     @property
@@ -470,7 +475,13 @@ class PackageNamespaceVersionDependency(StaticDependency):
         org: OrgConfig,
         options: Optional[PackageInstallOptions] = None,
         retry_options=None,
+        predict: bool = False,
     ):
+        if predict:
+            context.logger.info(
+                f"Predicting: Would install {self.namespace} {self.version}"
+            )
+            return
         options, retry_options, version = self.process_options(options, retry_options)
 
         if org.has_minimum_package_version(
@@ -543,7 +554,11 @@ class PackageVersionIdDependency(StaticDependency):
         org: OrgConfig,
         options: Optional[PackageInstallOptions] = None,
         retry_options=None,
+        predict: bool = False,
     ):
+        if predict:
+            context.logger.info(f"Predicting: Would install {self.version_id}")
+            return
         options, retry_options = self.process_options(options, retry_options)
 
         if any(
@@ -670,14 +685,20 @@ class UnmanagedDependency(StaticDependency, abc.ABC):
 
         return package_zip
 
-    def install(self, context: BaseProjectConfig, org: OrgConfig):
+    def install(
+        self, context: BaseProjectConfig, org: OrgConfig, predict: bool = False
+    ):
 
-        context.logger.info(f"Deploying unmanaged metadata from {self.description}")
+        if not predict:
+            context.logger.info(f"Deploying unmanaged metadata from {self.description}")
         # Initialize the package zip builder to set up self.hash and self.base64
         _ = self.get_metadata_package_zip_builder(context, org)
         # Initialize the ApiDeploy client to deploy the metadata
         task = TaskContext(org_config=org, project_config=context, logger=logger)
         api = ApiDeploy(task, self.base64)
+        if predict:
+            context.logger.info(f"Predicting: Would deploy {self.description}")
+            return
         return api()
 
 

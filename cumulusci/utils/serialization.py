@@ -5,6 +5,10 @@ from typing import Any, NamedTuple
 from pydantic import BaseModel, AnyUrl
 from enum import Enum
 from cumulusci.utils.version_strings import LooseVersion, StepVersion
+from cumulusci.core.declarations import (
+    TemplateAwareDirectoryPath,
+    TemplateAwareFilePath,
+)
 
 
 class JSONSerializer(NamedTuple):

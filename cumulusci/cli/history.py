@@ -299,9 +299,15 @@ def history_info(runtime, org_name, action_hash, data, print_json, indent, org_i
     action = org_history.get_action_by_hash(action_hash)
 
     if data:
-        click.echo(
-            json_dumps(action.get_org_tracker_hash(return_data=True), indent=indent)
-        )
+        hash_content = action.get_org_tracker_hash(return_data=True)
+        if not hash_content:
+            click.echo(
+                json_dumps(
+                    {"message": "No hash content found in action history"},
+                    indent=indent,
+                )
+            )
+        click.echo(json_dumps(hash_content, indent=indent))
         return
 
     if print_json:
@@ -374,9 +380,9 @@ def history_dependencies(
         org_history = org_config.history.previous_orgs.get(org_id)
 
     snapshot = org_history.get_snapshot_hash(return_data=True)
-    snapshot_hash = hash_obj(snapshot)
-    tracker_hash = hash_obj(snapshot["tracker"])
-    org_shape_hash = snapshot["org_shape"]
+    snapshot_hash = hash_obj(snapshot) if snapshot else None
+    tracker_hash = hash_obj(snapshot["tracker"]) if snapshot else None
+    org_shape_hash = snapshot["org_shape"] if snapshot else None
 
     if print_json:
         data = {
@@ -400,7 +406,7 @@ def history_dependencies(
     table.add_column("Hash")
     table.add_column("Content")
 
-    if not snapshot:
+    if not snapshot or not snapshot["tracker"]:
         table.add_row("No dependencies found", "")
     else:
         for dep_type, content in snapshot["tracker"].items():

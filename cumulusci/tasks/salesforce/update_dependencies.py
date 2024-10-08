@@ -3,6 +3,12 @@ from typing import List
 
 import click
 
+from cumulusci.core.declarations import (
+    FilesDeclaration,
+    MetadataDeclaration,
+    PackagesDeclaration,
+    TaskDeclarations,
+)
 from cumulusci.core.dependencies.dependencies import (
     Dependency,
     PackageNamespaceVersionDependency,
@@ -70,6 +76,27 @@ class UpdateDependencies(BaseSalesforceTask):
         },
         **{k: v for k, v in PACKAGE_INSTALL_TASK_OPTIONS.items() if k != "password"},
     }
+
+    declarations = TaskDeclarations(
+        can_predict_hashes=True,
+        packages=PackagesDeclaration(
+            installs=True,
+            upgrades=True,
+            description="Installs resolved packages and dependencies specified in the `dependencies` option",
+        ),
+        metadata=[
+            MetadataDeclaration(
+                deploys=True,
+                deletes=True,
+                description="Installs resolved metadata dependencies specified in the `dependencies` option. Can delete if the deployed metadata contains destructiveChanges.xml.",
+            )
+        ],
+        files=FilesDeclaration(
+            uses_external_repos=True,
+            uses_external_urls=True,
+            description="Installs resolved metadata dependencies specified in the `dependencies` option from remote GitHub repositories or zipped metadata at a URL. Can delete if the deployed metadata contains destructiveChanges.xml.",
+        ),
+    )
 
     def _init_options(self, kwargs):
         super(UpdateDependencies, self)._init_options(kwargs)
@@ -230,9 +257,17 @@ class UpdateDependencies(BaseSalesforceTask):
         self.return_values["dependencies"] = dependencies
 
         for d in dependencies:
+            # _install_dependency checks self.predict
             self._install_dependency(d)
 
         self.org_config.reset_installed_packages()
+
+        if self.predict:
+            return self.tracker
+
+    def _predict(self):
+        # _run_task is already set up to check self.predict
+        return self._run_task()
 
     def _install_dependency(self, dependency):
         if isinstance(
@@ -240,11 +275,14 @@ class UpdateDependencies(BaseSalesforceTask):
         ):
             track_data = dependency.get_package_install_tracking_data()
             self._track_package_install(**track_data)
-            dependency.install(
-                self.project_config, self.org_config, self.install_options
-            )
+            if not self.predict:
+                dependency.install(
+                    self.project_config, self.org_config, self.install_options
+                )
         else:
-            dependency.install(self.project_config, self.org_config)
+            dependency.install(
+                self.project_config, self.org_config, predict=self.predict
+            )
             if dependency.hash:
                 if isinstance(dependency, UnmanagedGitHubRefDependency):
                     self._track_github_metadata_deploy(

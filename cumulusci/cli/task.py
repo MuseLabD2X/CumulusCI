@@ -8,6 +8,7 @@ from rst2ansi import rst2ansi
 from cumulusci.core.config import TaskConfig
 from cumulusci.core.exceptions import CumulusCIUsageError
 from cumulusci.utils import doc_task
+from cumulusci.utils.yaml.render import yaml_dump
 
 from .runtime import pass_runtime
 from .ui import CliTable
@@ -122,6 +123,10 @@ def task_info(runtime, task_name, load_yml=None):
 class RunTaskCommand(click.MultiCommand):
     # options that are not task specific
     global_options = {
+        "predict": {
+            "help": "Predicts the outcome of the task including calculated hashes without running it",
+            "is_flag": True,
+        },
         "no-prompt": {
             "help": "Disables all prompts. Set for non-interactive mode such as calling from scripts or CI sytems",
             "is_flag": True,
@@ -197,7 +202,12 @@ class RunTaskCommand(click.MultiCommand):
 
                     pdb.set_trace()
 
-                task_instance()
+                predict = kwargs.get("predict", None)
+                if predict:
+                    tracker = task_instance(predict=predict)
+                    click.echo(f"Calculated hashes: {yaml_dump(tracker)}")
+                else:
+                    task_instance()
 
                 if kwargs.get("debug_after", None):
                     import pdb

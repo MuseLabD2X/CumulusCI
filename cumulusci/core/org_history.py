@@ -16,6 +16,7 @@ from pydantic import (
     validator,
 )
 from rich.text import Text
+from cumulusci.core.declarations import PackageType
 from cumulusci.core.exceptions import (
     OrgHistoryError,
     OrgActionNotFound,
@@ -44,15 +45,6 @@ class OrgActionStatus(Enum):
     SUCCESS = "success"
     FAILURE = "failure"
     ERROR = "error"
-
-
-class PackageType(Enum):
-    """Enum for the type of package"""
-
-    UNMANAGED = "unmanaged"
-    MANAGED_1GP = "managed_1gp"
-    MANAGED_2GP = "managed_2gp"
-    UNLOCKED_2GP = "unlocked_2gp"
 
 
 class BaseAction(BaseModel):
@@ -318,6 +310,10 @@ class ActionMetadataDeploys(BaseAction):
         ...,
         description="The metadata deployments from a URL",
     )
+
+    @property
+    def has_deploys(self):
+        return any([self.repo, self.github, self.zip_url])
 
 
 class ActionPackageInstall(BaseAction):
@@ -786,13 +782,11 @@ class BaseTaskAction(BaseAction):
         if self.package_installs:
             for package_install in self.package_installs:
                 hashes["package_installs"].append(package_install.hash)
+        if all([not value for value in hashes.values()]):
+            return None
         if return_data:
             return hashes
         return hash_obj(hashes)
-
-    @property
-    def hash_snapshot_dependencies(self):
-        return hash_obj(self.get_org_tracker_hash(return_data=True))
 
     @property
     def column_details(self):
@@ -959,7 +953,7 @@ class FlowOrgAction(BaseFlowAction, BaseOrgActionResult):
     def get_org_tracker_hash(
         self,
         return_data: bool = False,
-    ) -> str | Dict[str, Dict[str, List[str]]]:
+    ) -> str | Dict[str, Dict[str, List[str]]] | None:
         hashes = {
             "deploys": [],
             "transforms": [],
@@ -967,17 +961,17 @@ class FlowOrgAction(BaseFlowAction, BaseOrgActionResult):
         }
         for step in self.steps:
             step_data = step.task.get_org_tracker_hash(return_data=True)
+            if step_data is None:
+                continue
             hashes["deploys"].extend(step_data["deploys"])
             hashes["transforms"].extend(step_data["transforms"])
             hashes["package_installs"].extend(step_data["package_installs"])
 
+        if all([not value for value in hashes.values()]):
+            return None
         if return_data:
             return hashes
         return hash_obj(hashes)
-
-    @property
-    def hash_snapshot_dependencies(self):
-        return hash_obj(self.get_org_tracker_hash(return_data=True))
 
     @property
     def log(self):
@@ -1173,6 +1167,8 @@ class BaseOrgHistory(BaseAction):
 
         for action in self.filtered_actions(filters):
             action_data = action.get_org_tracker_hash(return_data=True)
+            if action_data is None:
+                continue
             hashes["deploys"].extend(action_data["deploys"])
             hashes["package_installs"].extend(action_data["package_installs"])
             hashes["transforms"].extend(action_data["transforms"])
@@ -1185,12 +1181,9 @@ class BaseOrgHistory(BaseAction):
         self,
         filters: FilterOrgActions | None = None,
         return_data: bool = False,
-    ) -> str | Dict[str, Dict[str, List[str] | str]]:
+    ) -> str | Dict[str, Dict[str, List[str] | str]] | None:
         """Calculate a hash of the org's shape and all tracked operations that impacted the org"""
-        hashes: Dict[str, Optional[Union[str, List[str]]]] = {
-            "org_shape": None,
-            "tracker": self.get_org_tracker_hash(filters, return_data=True),
-        }
+        tracker_hash_content = self.get_org_tracker_hash(filters, return_data=True)
 
         if filters is None:
             filters = FilterOrgActions()
@@ -1199,12 +1192,20 @@ class BaseOrgHistory(BaseAction):
         filters.action_type = ["Task", "Flow"]
         filters.status = "success"
 
+        org_shape = None
         create_action = self.filtered_actions(
             FilterOrgActions(action_type="OrgCreate", status="success")
         )
         if create_action:
-            hashes["org_shape"] = create_action[0].get_snapshot_shape_hash()
+            org_shape = create_action[0].get_snapshot_shape_hash()
 
+        if not org_shape and not tracker_hash_content:
+            return None
+
+        hashes: Dict[str, Optional[Union[str, List[str]]]] = {
+            "org_shape": org_shape,
+            "tracker": tracker_hash_content,
+        }
         if return_data:
             return hashes
         return hash_obj(hashes)

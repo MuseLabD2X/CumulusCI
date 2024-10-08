@@ -10,13 +10,19 @@ from cumulusci.core.exceptions import (
     ScratchOrgSnapshotError,
     ScratchOrgSnapshotFailure,
 )
+from cumulusci.core.declarations import (
+    DataDeclaration,
+    DevhubDeclaration,
+    OrgSnapshotDeclaration,
+    TaskDeclarations,
+)
 from cumulusci.core.github import set_github_output
 from cumulusci.core.utils import process_bool_arg, process_list_arg
 from cumulusci.salesforce_api.snapshot import (
     SnapshotManager,
     SnapshotNameValidator,
 )
-from cumulusci.tasks.salesforce import BaseSalesforceTask
+from cumulusci.tasks.salesforce import BaseSalesforceApiTask
 from cumulusci.tasks.devhub import BaseDevhubTask
 from cumulusci.tasks.github.base import BaseGithubTask
 from cumulusci.utils.hashing import hash_obj
@@ -31,6 +37,7 @@ from pydantic import BaseModel
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
+from rich.logging import RichHandler
 
 ORG_SNAPSHOT_FIELDS = [
     "Id",
@@ -72,6 +79,13 @@ class BaseCreateScratchOptions(CCIOptions):
             "The Salesforce Org ID of the source org to create the snapshot from."
             "Must be a valid scratch org for snapshots in the default devhub."
             "Defaults to the org passed to the task or flow."
+        ),
+    )
+    force_create: bool = Field(
+        False,
+        description=(
+            "Whether to force creation of a new snapshot even if an existing "
+            "snapshot with the same name and info is active. Defaults to False."
         ),
     )
 
@@ -217,12 +231,35 @@ class NameContextOptions(CCIOptions):
     )
 
 
-class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
+class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceApiTask):
     """Base class for tasks that create Scratch Org Snapshots."""
 
     # Peg to API Version 60.0 for OrgSnapshot object
     api_version = "60.0"
     salesforce_task = True
+    declarations = TaskDeclarations(
+        can_predict_hashes=True,
+        can_rerun_safely=True,
+        data=[
+            DataDeclaration(
+                reads=True,
+                modifies=True,
+                deletes=True,
+                objects=["OrgSnapshot"],
+                description="Queries, updates, and deletes OrgSnapshot records",
+            )
+        ],
+        devhub=DevhubDeclaration(
+            uses_devhub=True,
+            description="The Dev Hub org is used for Scratch Org Snapshots",
+        ),
+        snapshots=OrgSnapshotDeclaration(
+            creates=True,
+            modifies=True,
+            deletes=True,
+            description="The Scratch Org Snapshot object in the Salesforce API",
+        ),
+    )
 
     class Options(BaseCreateScratchOptions):
         pass
@@ -294,6 +331,9 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
         }
 
     def _run_task(self):
+        previous_handlers = self.logger.handlers
+        self.logger.addHandler(RichHandler())
+
         skip_reason = self._should_create_snapshot()
         snapshot_manager = SnapshotManager(self.devhub, self.logger)
         if skip_reason and skip_reason is not True:
@@ -303,14 +343,23 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
             #     self.logger.warning(
             #         "In-progress snapshot does not meet conditions for finalization. Deleting..."
             #     )
-            self.console.print(
-                Panel(
-                    f"No snapshot creation required based on current conditions. {self.return_values.get('skip_reason','')}",
-                    title="Snapshot Creation",
-                    border_style="yellow",
+            if self.parsed_options.force_create:
+                self.console.print(
+                    Panel(
+                        "Forcing creation of a new snapshot even if an existing snapshot with the same name and info is active.",
+                        title="Snapshot Creation Override",
+                        style="yellow",
+                    )
                 )
-            )
-            return
+            else:
+                self.console.print(
+                    Panel(
+                        f"No snapshot creation required based on current conditions. {self.return_values.get('skip_reason','')}",
+                        title="Snapshot Creation",
+                        border_style="yellow",
+                    )
+                )
+                return
 
         self.logger.info("Starting scratch org snapshot creation")
         snapshot_name = self._generate_snapshot_name()
@@ -362,6 +411,8 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceTask):
             )
         if self.is_github_job and self.parsed_options.github_environment_prefix:
             self._create_github_environment(snapshot_name)
+
+        self.logger.handlers = previous_handlers
 
     def _should_create_snapshot(self):
         return True

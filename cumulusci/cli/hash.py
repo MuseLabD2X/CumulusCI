@@ -247,7 +247,7 @@ def hash_dependencies(runtime, resolution_strategy, org, print_json, indent):
     console.print()
 
     console.print(Text("Static Dependency Hashes:"))
-    console.print(Text(f"  Dependencies: {deps_hash}", style="bold"))
+    console.print(Text(f"  Dependencies: {hash_obj(dependencies)}", style="bold"))
     console.print(Text(f"  Tracker: {tracker_hash}", style="bold"))
     if org_shape_hash:
         snapshot_hash = hash_obj(

@@ -18,6 +18,12 @@ class BaseSalesforceMetadataApiTask(BaseSalesforceTask):
             self.return_values = result
         return result
 
+    def _predict(self):
+        api = self._get_api()
+        if api:
+            self._track_metadata_request(api)
+        return self.tracker
+
     def _track_metadata_request(self, api):
         """Hook for subclasses to track metadata requests"""
         pass

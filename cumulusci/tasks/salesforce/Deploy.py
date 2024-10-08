@@ -5,6 +5,11 @@ from defusedxml.minidom import parseString
 from pydantic import ValidationError
 
 from cumulusci.cli.ui import CliTable
+from cumulusci.core.declarations import (
+    TaskDeclarations,
+    MetadataDeclaration,
+    FilesDeclaration,
+)
 from cumulusci.core.dependencies.utils import TaskContext
 from cumulusci.core.exceptions import TaskOptionsError
 from cumulusci.core.sfdx import convert_sfdx_source
@@ -42,9 +47,6 @@ class Deploy(BaseSalesforceMetadataApiTask):
         "check_only": {
             "description": "If True, performs a test deployment (validation) of components without saving the components in the target org"
         },
-        "hash_only": {
-            "description": "If True, only computes the hash of the deployment package and does not deploy"
-        },
         "collision_check": {
             "description": "If True, performs a collision check with metadata already present in the target org"
         },
@@ -72,6 +74,21 @@ class Deploy(BaseSalesforceMetadataApiTask):
     namespaces = {"sf": "http://soap.sforce.com/2006/04/metadata"}
 
     transforms: List[SourceTransform] = []
+
+    declarations = TaskDeclarations(
+        can_predict_hashes=True,
+        metadata=[
+            MetadataDeclaration(
+                deploys=True,
+                description="Deploys metadata from a local repo directory to a Salesforce org",
+            )
+        ],
+        files=FilesDeclaration(
+            uses_repo_directories=True,
+            repo_directories=["{options.path}"],
+            description="Deploys files from a local directory specified by the `path` option",
+        ),
+    )
 
     def _init_options(self, kwargs):
         super(Deploy, self)._init_options(kwargs)
@@ -113,10 +130,6 @@ class Deploy(BaseSalesforceMetadataApiTask):
                     f"The validation error was {str(e)}"
                 )
 
-        self.options["hash_only"] = process_bool_arg(
-            self.options.get("hash_only", False)
-        )
-
         # Set class variable to true if rest_deploy is set to True
         self.rest_deploy = process_bool_arg(self.options.get("rest_deploy", False))
 
@@ -132,9 +145,9 @@ class Deploy(BaseSalesforceMetadataApiTask):
             )
             table_header_row = ["Type", "Component API Name"]
             table_data = [table_header_row]
-            for type in package_zip.keys():
-                for component_name in package_zip[type]:
-                    table_data.append([type, component_name])
+            for md_type in package_zip.keys():
+                for component_name in package_zip[md_type]:
+                    table_data.append([md_type, component_name])
             table = CliTable(
                 table_data,
             )
@@ -144,10 +157,6 @@ class Deploy(BaseSalesforceMetadataApiTask):
             self.logger.info("Payload size: {} bytes".format(len(package_zip)))
         else:
             self.logger.warning("Deployment package is empty; skipping deployment.")
-            return
-
-        if self.options.get("hash_only"):
-            self.logger.info("Hash only mode; skipping deployment.")
             return
 
         # If rest_deploy param is set, update api_class to be RestDeploy
@@ -173,6 +182,11 @@ class Deploy(BaseSalesforceMetadataApiTask):
     def _has_namespaced_package(self, ns: Optional[str]) -> bool:
         if "unmanaged" in self.options:
             return not process_bool_arg(self.options.get("unmanaged", True))
+        if self.predict:
+            self.logger.warning(
+                "The unmanaged option is not set. Assuming the package is managed."
+            )
+            return False
         return bool(ns) and ns in self.org_config.installed_packages
 
     def _is_namespaced_org(self, ns: Optional[str]) -> bool:

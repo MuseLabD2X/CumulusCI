@@ -145,12 +145,12 @@ class SnapshotManager:
         end_time = start_time + timeout
 
         while time.time() < end_time:
-            try:
-                snapshot = self.devhub.OrgSnapshot.get(snapshot_id)
-            except SalesforceResourceNotFound as exc:
-                raise ScratchOrgSnapshotFailure(
-                    "Snapshot not found. This usually happens because another build deleted the snapshot while it was being built."
-                ) from exc
+            # try:
+            #     snapshot = self.devhub.OrgSnapshot.get(snapshot_id)
+            # except SalesforceResourceNotFound as exc:
+            #     raise ScratchOrgSnapshotFailure(
+            #         "Snapshot not found. This usually happens because another build deleted the snapshot while it was being built."
+            #     ) from exc
 
             status = snapshot.get("Status")
             progress.update(
@@ -215,7 +215,7 @@ class SnapshotManager:
             progress.update(
                 task, advance=10, description="[green]Creating new snapshot"
             )
-            snapshot_id = self.create_org_snapshot(temp_name, description, source_org)
+            snapshot_id = "123" #self.create_org_snapshot(temp_name, description, source_org)
 
             if not wait:
                 snapshot = self.devhub.OrgSnapshot.get(snapshot_id)

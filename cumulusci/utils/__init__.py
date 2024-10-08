@@ -17,6 +17,7 @@ import requests
 import sarge
 
 from cumulusci.core.exceptions import CumulusCIException
+from cumulusci.utils.yaml.render import yaml_dump
 from .xml import (  # noqa
     elementtree_parse_file,
     remove_xml_element,
@@ -376,6 +377,48 @@ def doc_task(task_name, task_config, project_config=None, org_config=None):
     if task_option_doc:
         doc.append("Options\n------------------------------------------\n")
         doc.extend(task_option_doc)
+
+    declarations = task_class.declarations
+    if declarations:
+        dec_docs = []
+        dec_docs.append("\nDeclarations\n------------------------------------------\n")
+
+        # Loop through each key, value in the declarations dictionary
+        for key, value in declarations.dict(exclude_defaults=True).items():
+            # Handle non-dict and non-list values inline
+            if not isinstance(value, (dict, list)):
+                dec_docs.append(f"**{key}**: {value}\n")
+            elif isinstance(value, dict):
+                # Extract description if it exists
+                description = value.pop("description", None)
+                if description:
+                    dec_docs.append(f"**{key}**: {description}\n")
+                else:
+                    dec_docs.append(f"**{key}**:\n")
+                # Format remaining items in the dict
+                for sub_key, sub_value in value.items():
+                    dec_docs.append(f"    {sub_key}: {sub_value}\n")
+            elif isinstance(value, list):
+                # For lists, format each item with its description if present
+                dec_docs.append(f"**{key}**:\n")
+                for item in value:
+                    if isinstance(item, dict):
+                        # Extract description from nested dict and use as header
+                        description = item.pop("description", "Record")
+                        dec_docs.append(f"    {description}:\n")
+                        for sub_key, sub_value in item.items():
+                            # Convert nested lists to sorted CSV strings
+                            if isinstance(sub_value, list):
+                                csv_string = ", ".join(sorted(map(str, sub_value)))
+                                dec_docs.append(f"        {sub_key}: {csv_string}\n")
+                            else:
+                                dec_docs.append(f"        {sub_key}: {sub_value}\n")
+                    else:
+                        # Handle non-dict items in the list
+                        dec_docs.append(f"    {item}\n")
+
+        # Add the declarations section to the main documentation
+        doc.extend(dec_docs)
 
     return "\n".join(doc)
 

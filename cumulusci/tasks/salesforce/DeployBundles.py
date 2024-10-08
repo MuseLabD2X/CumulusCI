@@ -1,6 +1,11 @@
 import copy
 import os
 
+from cumulusci.core.declarations import (
+    TaskDeclarations,
+    MetadataDeclaration,
+    FilesDeclaration,
+)
 from cumulusci.tasks.salesforce import Deploy
 
 deploy_options = copy.deepcopy(Deploy.task_options)
@@ -11,6 +16,21 @@ deploy_options["path"][
 
 class DeployBundles(Deploy):
     task_options = deploy_options
+
+    declarations = TaskDeclarations(
+        can_predict_hashes=True,
+        metadata=[
+            MetadataDeclaration(
+                deploys=True,
+                description="Deploys metadata bundles from subdirectories a local repo directory to a Salesforce org",
+            )
+        ],
+        files=FilesDeclaration(
+            uses_repo_directories=True,
+            repo_directories=["{options.path}"],
+            description="Deploys metadata files from a local directory specified by the `path` option",
+        ),
+    )
 
     def _run_task(self):
         path = self.options["path"]

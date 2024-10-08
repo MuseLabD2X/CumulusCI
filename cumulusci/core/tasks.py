@@ -14,6 +14,7 @@ from datetime import datetime
 from io import StringIO
 from typing import Any, Callable, Dict, List, Optional, Type, Union
 
+from pydantic import BaseModel, Field
 from pydantic.error_wrappers import ValidationError
 
 from cumulusci import __version__
@@ -36,12 +37,14 @@ from cumulusci.core.config.project_config import BaseProjectConfig
 from cumulusci.core.debug import DebugMode, get_debug_mode
 from cumulusci.core.exceptions import (
     CumulusCIFailure,
+    DeclarationConfigError,
     ServiceNotConfigured,
     ServiceNotValid,
     TaskOptionsError,
     TaskRequiresSalesforceOrg,
 )
 from cumulusci.core.flowrunner import FlowCoordinator, StepSpec, StepVersion
+from cumulusci.core.declarations import TaskDeclarations
 from cumulusci.salesforce_api.package_models import PackageInstallOptions
 from cumulusci.utils import cd
 from cumulusci.utils.logging import redirect_output_to_logger
@@ -83,6 +86,8 @@ class BaseTask:
     logger: logging.Logger
     options: dict
     tracker: TaskActionTracker
+    declarations: TaskDeclarations | None = None
+    has_declarations: bool = False
     action: TaskOrgAction | None
 
     poll_complete: bool
@@ -118,11 +123,22 @@ class BaseTask:
         # the task's stepnumber in the flow
         self.stepnum = stepnum
 
+        # If the task is in predict mode. Set automatically by __call__(predict=True)
+        self.predict: bool = False
+
         self.debug_mode = get_debug_mode()
         if logger:
             self.logger = logger
         else:
             self._init_logger()
+
+        self.has_declarations = self.declarations is not None
+        if not self.declarations:
+            self.logger.info(
+                "Using default task declarations: This task should be updated to define TaskDeclarations. \n"
+                "See https://cumulusci.readthedocs.io/en/stable/org-history.html#task-declarations for more information."
+            )
+            self.declarations = TaskDeclarations()
 
         self._init_options(kwargs)
         self._validate_options()
@@ -258,14 +274,16 @@ class BaseTask:
         """Override to implement dynamic logic for initializing the task."""
         pass
 
-    def __call__(self) -> dict:
+    def __call__(self, predict: bool = False) -> dict | TaskActionTracker:
         if self.salesforce_task and not self.org_config:
             raise TaskRequiresSalesforceOrg(
                 "This task requires a salesforce org. "
                 "Use org default <name> to set a default org "
                 "or pass the org name with the --org option"
             )
-        self._update_credentials()
+        self.predict = predict
+        if not predict:
+            self._update_credentials()
         self._init_task()
 
         with stacked_task(self):
@@ -279,19 +297,42 @@ class BaseTask:
                         else nullcontext()
                     ):
                         self._log_begin()
+                        if predict:
+                            tracker = self._predict()
+                            self.predict = False
+                            return tracker
                         self.result = self._run_task()
                         self._record_result()
                         return self.return_values
             except Exception as e:
-                self._record_result(e)
+                if predict:
+                    self.predict = False
+                else:
+                    self._record_result(e)
                 raise e from e
 
     def _run_task(self) -> Any:
         """Subclasses should override to provide their implementation"""
         raise NotImplementedError("Subclasses should provide their own implementation")
 
-    def _log_begin(self):
+    def _predict(self) -> TaskActionTracker | None:
+        """Subclasses should override to provide their implementation"""
+        if self.declarations.can_predict_hashes:
+            raise TaskCannotPredict(
+                "Task declares `can_predict_hashes` but does not implement `_predict`"
+            )
+        if not self.has_declarations:
+            self.logger.warning(
+                "The task does not have declarations and cannot predict hashes. No predictions returned."
+            )
+
+        return None
+
+    def _log_begin(self, predict: bool = False):
         """Log the beginning of the task execution"""
+        if self.predict:
+            self.logger.info(f"Predicting task: {self.__class__.__name__}")
+            return
         self.logger.info(f"Beginning task: {self.__class__.__name__}")
         if self.salesforce_task and not self.flow:
             self.logger.info(f"As user: {self.org_config.username}")
@@ -650,8 +691,9 @@ class BaseSalesforceTask(BaseTask):
         raise NotImplementedError("Subclasses should provide their own implementation")
 
     def _update_credentials(self):
-        with self.org_config.save_if_changed():
-            self.org_config.refresh_oauth_token(self.project_config.keychain)
+        if not self.predict:
+            with self.org_config.save_if_changed():
+                self.org_config.refresh_oauth_token(self.project_config.keychain)
 
     def _validate_and_inject_namespace_prefixes(
         self,
@@ -713,14 +755,3 @@ class BaseSalesforceTask(BaseTask):
             return injected
         else:
             return sobject
-
-
-class BaseSalesforceActionTask(BaseSalesforceTask):
-    """Base class for tasks that perform actions on a Salesforce org"""
-
-    modifies_data = False
-    modifies_metadata = False
-    modifies_security = False
-    references_directories = False
-    references_files = False
-    runs_commands = False

@@ -323,3 +323,15 @@ class OrgActionNotFound(CumulusCIUsageError):
     """Raised when an org action is not found in the project configuration"""
 
     pass
+
+
+class DeclarationConfigError(CumulusCIException):
+    """Raised when an error occurs with a Declaration configuration"""
+
+    pass
+
+
+class TaskCannotPredict(CumulusCIException):
+    """Raised when a task cannot be predicted"""
+
+    pass
