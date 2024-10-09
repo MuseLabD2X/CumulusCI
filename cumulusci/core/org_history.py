@@ -7,7 +7,6 @@ from logging import Logger
 from pathlib import Path, PosixPath
 from typing import Any, Dict, List, Optional, Tuple, Union
 from typing_extensions import Literal
-from jsonpath_ng import jsonpath, parse
 from pydantic import (
     BaseModel,
     DirectoryPath,
