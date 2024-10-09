@@ -17,6 +17,14 @@ class BaseSalesforceApiTask(BaseSalesforceTask):
         self._init_class()
 
     def _init_api(self, base_url=None):
+        def predict_simple_salesforce(*args, **kwargs):
+            raise NotImplementedError(
+                "Salesforce API calls are not supported for predictions unless implemented specifically by subclasses"
+            )
+
+        if self.predict:
+            return predict_simple_salesforce
+
         rv = get_simple_salesforce_connection(
             self.project_config,
             self.org_config,
@@ -30,6 +38,15 @@ class BaseSalesforceApiTask(BaseSalesforceTask):
         version = self.api_version or self.project_config.project__package__api_version
         if not version:
             raise ConfigError("Cannot find Salesforce version")
+
+        def predict_bulk(*args, **kwargs):
+            raise NotImplementedError(
+                "Salesforce Bulk API calls are not supported for predictions unless implemented specifically by subclasses"
+            )
+
+        if self.predict:
+            return predict_bulk
+
         return SalesforceBulk(
             host=self.org_config.instance_url.replace("https://", "").rstrip("/"),
             sessionId=self.org_config.access_token,

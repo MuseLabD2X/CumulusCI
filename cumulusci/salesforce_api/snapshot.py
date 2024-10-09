@@ -61,21 +61,31 @@ class SnapshotManager:
     def query(
         self,
         snapshot_id: Optional[str] = None,
+        snapshot_ids: Optional[list] = None,
         snapshot_name: Optional[str] = None,
+        snapshot_names: Optional[list] = None,
         description: Optional[str] = None,
         status: Optional[list] = None,
         limit: Optional[int] = None,
     ):
+        if isinstance(status, str):
+            status = [status]
         query = f"SELECT {', '.join(ORG_SNAPSHOT_FIELDS)} FROM OrgSnapshot"
         where_clauses = []
         if snapshot_id:
             where_clauses.append(f"Id = '{snapshot_id}'")
+        if snapshot_ids:
+            where_clauses.append(f"Id IN ({', '.join([f'\'{s}\'' for s in snapshot_ids])})")
         if snapshot_name:
             where_clauses.append(f"SnapshotName = '{snapshot_name}'")
+        if snapshot_names:
+            where_clauses.append(f"SnapshotName IN ({', '.join([f'\'{s}\'' for s in snapshot_names])})")
         if description:
             where_clauses.append(f"Description LIKE '{description}'")
         if status:
             where_clauses.append(f"Status IN ({', '.join([f'\'{s}\'' for s in status])})")
+            
+        self.logger.info(f"Querying snapshots with filters: {where_clauses}")
         
         if where_clauses:
             query += " WHERE " + " AND ".join(where_clauses)
@@ -83,7 +93,7 @@ class SnapshotManager:
         if limit:
             query += f" LIMIT {limit}"
         
-        return self.devhub.query(query)
+        return self.devhub.query_all(query)
 
     def query_existing_active_snapshot(self, snapshot_name: str):
         result = self.query(snapshot_name=snapshot_name, status=["Active"])
@@ -239,6 +249,10 @@ class SnapshotUX:
             
             # Add a pause here
             self.pause_display(live)
+            if not self.is_ci_environment:
+                self.snapshots.logger.info("Snapshot Creation Log:")
+                self.snapshots.logger.info("  " + "\n  ".join(self.log_messages))
+                self.snapshots.logger.info("Snapshot creation complete!")
 
         return snapshot
    
@@ -247,13 +261,16 @@ class SnapshotUX:
         self.progress.update(self.overall_progress, advance=10, description="Finalizing snapshot")
         if update_existing:
             if self.snapshots.existing_active_snapshot:
-                if self.snapshots.existing_active_snapshot["Id"] == snapshot_id:
+                if self.snapshots.existing_active_snapshot["SnapshotName"] != snapshot_name:
+                    self.snapshots.rename_snapshot(snapshot_id, snapshot_name)
+                    self.log(f"Snapshot {snapshot_id} finalized and renamed to {snapshot_name}")
+                elif self.snapshots.existing_active_snapshot["Id"] == snapshot_id:
                     self.log("Snapshot is already active, skipping rename")
                 else:
                     self.snapshots.delete_snapshot(self.snapshots.existing_active_snapshot["Id"])
                     self.log(f"Deleted existing active snapshot with ID {self.snapshots.existing_active_snapshot['Id']}")   
-                    self.snapshots.rename_snapshot(snapshot_id, base_name)
-                    self.log(f"Snapshot {snapshot_id} finalized and renamed to {base_name}")
+                    self.snapshots.rename_snapshot(snapshot_id, snapshot_name)
+                    self.log(f"Snapshot {snapshot_id} finalized and renamed to {snapshot_name}")
                         
                         
     def pause_display(self, live, timeout=30):
@@ -315,23 +332,29 @@ class SnapshotUX:
 
         raise TimeoutError(f"Snapshot {snapshot_id} did not complete within {timeout} seconds.")
 
+    
     def estimate_completion_time(self):
         recent_snapshots = self.snapshots.query(status=["Active"], limit=5)
         if recent_snapshots["totalSize"] > 0:
-            total_time = sum((s["LastModifiedDate"] - s["CreatedDate"]).total_seconds() for s in recent_snapshots["records"])
+            total_time = sum(
+                (datetime.strptime(s["LastModifiedDate"], '%Y-%m-%dT%H:%M:%S.%f%z') - 
+                 datetime.strptime(s["CreatedDate"], '%Y-%m-%dT%H:%M:%S.%f%z')).total_seconds() 
+                for s in recent_snapshots["records"]
+            )
             avg_time = total_time / recent_snapshots["totalSize"]
             self.estimated_completion_time = datetime.now() + timedelta(seconds=avg_time)
             self.log(f"Estimated completion time: {self.estimated_completion_time.strftime('%H:%M:%S')}")
         else:
             self.log("Unable to estimate completion time")
-
+            
+            
     def finalize_temp_snapshot(self, snapshot_name: str, description: str, snapshot_id: str, update_existing: bool = True):
         with Live(self.layout, console=self.console, screen=True, refresh_per_second=4) as live:
             self.log(f"Finalizing temporary snapshot {snapshot_id} to {snapshot_name}")
 
             # Check for existing snapshots
             self.progress.update(self.overall_progress, advance=10, description="Checking existing snapshots")
-            self.snapshots.query_existing_active_snapshot(snapshot_name)
+            self.snapshots.existing_active_snapshot = self.snapshots.devhub.OrgSnapshot.get(snapshot_id)
             self.log("Existing snapshot check complete")
 
             # Poll for completion

@@ -176,6 +176,10 @@ def history_orgs(runtime, org_name, print_json, indent):
     "--after", help="Include only actions that ran after the specified action hash"
 )
 @click.option(
+    "--jsonpath",
+    help="Filter by JSONPath expression. See https://jsonpath.com/ for syntax.",
+)
+@click.option(
     "--org-id",
     help="List the actions run against a previous org instance by org id. Use `cci history previous` to list previous org instances.",
 )
@@ -193,6 +197,7 @@ def history_list(
     exclude_config_hash=None,
     before=None,
     after=None,
+    jsonpath=None,
     org_id=None,
     print_json=False,
     indent=4,
@@ -215,12 +220,6 @@ def history_list(
     if org_id:
         org_history = org_history.previous_orgs.get(org_id)
 
-    if print_json:
-        click.echo(json_dumps(org_history.dict(), indent=indent))
-        return
-
-    console = Console()
-    console.print()
     table_title = f"Org History for {org_name}"
     if org_id:
         table_title += f" (Previous Org: {org_id})"
@@ -239,9 +238,15 @@ def history_list(
 
     filters = instance_from_locals(FilterOrgActions, locals())
 
-    actions = org_history.filtered_actions(filters)
+    actions = org_history.filtered_actions(filters, jsonpath=jsonpath)
     if not actions:
         table.add_row("No history available", "", "", "", "")
+
+    if print_json:
+        if not actions:
+            actions = []
+        click.echo(json_dumps(actions, indent=indent))
+        return
 
     else:
         last_action_hash = None
@@ -259,6 +264,8 @@ def history_list(
             )
             last_action_hash = action.hash_action
 
+    console = Console()
+    console.print()
     console.print(table)
     console.print()
     if last_action_hash:
@@ -545,14 +552,13 @@ def history_clear(runtime, org_name, clear_all, before, after, action_hash, org_
     org_name, org_config = runtime.get_org(org_name)
     console = Console()
     console.print()
+    filters = FilterOrgActions()
     if clear_all:
-        org_config.clear_history(org_id=org_id)
+        org_config.clear_history(org_id=org_id, filters=filters)
     elif any([before, after, action_hash]):
-        filters = FilterOrgActions(
-            action_hash=action_hash,
-            before=before,
-            after=after,
-        )
+        filters.action_hash = action_hash
+        filters.before = before
+        filters.after = after
 
         console.print(Text("Using filters:", style="bold"))
         console.print(

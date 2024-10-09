@@ -6,6 +6,10 @@ from pathlib import Path
 from urllib.parse import quote, unquote
 
 from cumulusci.core.config import TaskConfig
+from cumulusci.core.declarations import (
+    MetadataDeclaration,
+    TaskDeclarations,
+)
 from cumulusci.core.enums import StrEnum
 from cumulusci.core.exceptions import CumulusCIException, TaskOptionsError
 from cumulusci.core.org_history import (
@@ -49,6 +53,19 @@ class BaseMetadataETLTask(BaseSalesforceTask, metaclass=ABCMeta):
             "description": "If True, only hash the metadata and do not deploy it."
         },
     }
+
+    declarations = TaskDeclarations(
+        can_predict_hashes=True,
+        can_rerun_safely=True,
+        metadata=[
+            MetadataDeclaration(
+                deploys=True,
+                retrieves=True,
+                deletes=False,
+                description="Metadata Transforms (ETL) retrieve, transform, and deploy metadata roundtrip to make specific changes without overwriting existing customizations. The metadata modified is usually specified in the {api_names} task option. They should be safe to re-run against an org at any time",
+            ),
+        ],
+    )
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -271,6 +288,18 @@ class BaseMetadataETLTask(BaseSalesforceTask, metaclass=ABCMeta):
                 result = self._deploy()
                 self._post_deploy(result)
                 self._track_metadata_etl()
+
+    def _predict(self):
+        """Predict the hash of the transformed metadata."""
+        return
+        # Commented out for now because it requires an org
+        # with tempfile.TemporaryDirectory() as tempdir:
+        #     self._create_directories(tempdir)
+        #     if self.retrieve:
+        #         self._retrieve()
+        #     self._transform()
+        #     self._create_diff()
+        #     self._track_metadata_etl()
 
 
 class BaseMetadataSynthesisTask(BaseMetadataETLTask, metaclass=ABCMeta):

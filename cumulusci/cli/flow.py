@@ -402,6 +402,11 @@ def flow_info(
     help="Predict the changes that will be made by the flow without making them",
 )
 @click.option(
+    "--use-snapshots",
+    is_flag=True,
+    help="Override the flow and org's `use_snapshots` option. If True, first run the flow in predict mode to get the predicted snapshots, then look for an active snapshot to start from, and finally run the rest of the flow.",
+)
+@click.option(
     "--rich",
     is_flag=True,
     help="Use the rich library for output formatting",
@@ -431,6 +436,7 @@ def flow_run(
     o,
     no_prompt,
     predict=None,
+    use_snapshots=None,
     rich=None,
     skip=None,
     skip_from=None,
@@ -441,7 +447,7 @@ def flow_run(
         skip = skip.split(",")
 
     # Get necessary configs
-    org, org_config = runtime.get_org(org)
+    org, org_config = runtime.get_org(org, check_expired=use_snapshots or predict)
     if delete_org and not org_config.scratch:
         raise click.UsageError("--delete-org can only be used with a scratch org")
 
@@ -466,7 +472,12 @@ def flow_run(
             skip=skip,
             skip_from=skip_from,
             start_from=start_from,
+            force_use_snapshots=use_snapshots,
         )
+        if coordinator.use_snapshots:
+            click.echo("** Using snapshot predictions to find matching snapshots for flow layers")
+            click.echo("   This process will first run the flow in predict mode to calculate hashes")
+            click.echo("   to look for active scratch org snapshots to start the org from.")
         if rich:
             # Replace the default handler with the RichHandler
             coordinator.logger.handlers = []

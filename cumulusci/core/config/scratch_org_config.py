@@ -1,13 +1,19 @@
+import contextlib
 import datetime
 import json
 import os
+from tempfile import NamedTemporaryFile
 from typing import List, NoReturn, Optional
 
 import sarge
 
 from cumulusci.core.config import FAILED_TO_CREATE_SCRATCH_ORG
 from cumulusci.core.config.sfdx_org_config import SfdxOrgConfig
-from cumulusci.core.org_history import OrgCreateAction, OrgDeleteAction
+from cumulusci.core.org_history import (
+    ActionScratchDefReference,
+    OrgCreateAction,
+    OrgDeleteAction,
+)
 from cumulusci.core.exceptions import (
     CumulusCIException,
     ScratchOrgException,
@@ -70,6 +76,10 @@ class ScratchOrgConfig(SfdxOrgConfig):
         if not self.scratch_org_type:
             self.config["scratch_org_type"] = "workspace"
 
+        config = ActionScratchDefReference(
+            path=self.config_file,
+        )
+
         org_action_info = {
             "timestamp": datetime.datetime.now().timestamp(),
             "action_type": "OrgCreate",
@@ -80,31 +90,41 @@ class ScratchOrgConfig(SfdxOrgConfig):
                 f"orgs__scratch__{self.name}"
             ),
             "config": {
-                "path": self.config_file,
+                "source_path": os.path.abspath(self.config_file),
+                "path": os.path.abspath(
+                    self.config_file
+                ),  # This will be updated if we use a temp file
             },
             "days": self.days,
             "namespaced": self.namespaced,
             "log": "",
         }
-        args: List[str] = self._build_org_create_args()
-        extra_args = os.environ.get("SFDX_ORG_CREATE_ARGS", "")
-        command = f"force:org:create --json {extra_args}"
 
-        p: sarge.Command = sfdx(
-            command=command,
-            args=args,
-            username=None,
-            log_note="Creating scratch org",
-        )
-        stdout = p.stdout_text.read()
-        stderr = p.stderr_text.read()
-
-        org_action_info["sf_command"] = {
-            "command": f"sf {command} {' '.join(args)}",
-            "return_code": p.returncode,
-            "output": stdout,
-            "stderr": stderr,
-        }
+        @contextlib.contextmanager
+        def temp_scratchdef_file():
+            if self.use_snapshot_hashes:
+                if not self.snapshot_hashes:
+                    raise ScratchOrgException(
+                        "Snapshot hashes are required when use_snapshot_hashes is True"
+                    )
+                snapshot_hash = self.snapshot_hashes[-1]
+                with NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+                    json.dump(
+                        config.to_snapshot_scratchdef(
+                            snapshot=snapshot_hash["snapshot"]["SnapshotName"],
+                            description=f" via snapshot matched by hash {snapshot_hash['snapshot_hash']}",
+                        ),
+                        f,
+                    )
+                    f.flush()
+                    temp_file_path = os.path.abspath(f.name)
+                try:
+                    org_action_info["config"]["path"] = temp_file_path
+                    yield temp_file_path
+                finally:
+                    os.unlink(temp_file_path)
+            else:
+                yield org_action_info["config"]["path"]
 
         def raise_error() -> NoReturn:
             message = f"{FAILED_TO_CREATE_SCRATCH_ORG}: \n{stdout}\n{stderr}"
@@ -125,8 +145,8 @@ class ScratchOrgConfig(SfdxOrgConfig):
                         )
                     )
                     raise exc
-            except json.decoder.JSONDecodeError:
-                raise ScratchOrgException(message)
+            except json.decoder.JSONDecodeError as exc:
+                raise ScratchOrgException(message) from exc
 
             exc = ScratchOrgException(message)
             org_action_info["exception"] = str(exc)
@@ -137,49 +157,74 @@ class ScratchOrgConfig(SfdxOrgConfig):
             )
             raise exc
 
-        result = {}  # for type checker.
-        if p.returncode:
-            raise_error()
-        try:
-            result = json.loads(stdout)
+        with temp_scratchdef_file() as config_file:
+            args: List[str] = []
+            if self.use_snapshot_hashes:
+                args.extend(self._build_org_create_args(config_file))
+            else:
+                args.extend(self._build_org_create_args())
+            extra_args = os.environ.get("SFDX_ORG_CREATE_ARGS", "")
+            command = f"force:org:create --json {extra_args}"
+            with open(config_file, "r") as f:
+                self.logger.info(f.read())
+            p: sarge.Command = sfdx(
+                command=command,
+                args=args,
+                username=None,
+                log_note="Creating scratch org",
+            )
+            stdout = p.stdout_text.read()
+            stderr = p.stderr_text.read()
 
-        except json.decoder.JSONDecodeError:
-            raise_error()
+            org_action_info["sf_command"] = {
+                "command": f"sf {command} {' '.join(args)}",
+                "return_code": p.returncode,
+                "output": stdout,
+                "stderr": stderr,
+            }
+            result = {}  # for type checker.
+            if p.returncode:
+                raise_error()
+            try:
+                result = json.loads(stdout)
 
-        res = result.get("result")
-        if not res or ("username" not in res) or ("orgId" not in res):
-            raise_error()
+            except json.decoder.JSONDecodeError:
+                raise_error()
 
-        if res["username"] is None:
-            raise ScratchOrgException(
-                "SFDX claimed to be successful but there was no username "
-                "in the output...maybe there was a gack?"
+            res = result.get("result")
+            if not res or ("username" not in res) or ("orgId" not in res):
+                raise_error()
+
+            if res["username"] is None:
+                raise ScratchOrgException(
+                    "SFDX claimed to be successful but there was no username "
+                    "in the output...maybe there was a gack?"
+                )
+
+            self.config["org_id"] = res["orgId"]
+            self.config["username"] = res["username"]
+
+            self.config["date_created"] = datetime.datetime.utcnow()
+
+            self.logger.error(stderr)
+
+            self.logger.info(
+                f"Created: OrgId: {self.config['org_id']}, Username:{self.config['username']}"
             )
 
-        self.config["org_id"] = res["orgId"]
-        self.config["username"] = res["username"]
-
-        self.config["date_created"] = datetime.datetime.utcnow()
-
-        self.logger.error(stderr)
-
-        self.logger.info(
-            f"Created: OrgId: {self.config['org_id']}, Username:{self.config['username']}"
-        )
-
-        scratch_org_info = res.get("ScratchOrgInfo", {})
-        org_action_info["status"] = "success"
-        org_action_info["org_id"] = self.org_id
-        org_action_info["sfdx_alias"] = self.sfdx_alias
-        org_action_info["username"] = self.username
-        org_action_info["login_url"] = scratch_org_info.get("LoginUrl")
-        org_action_info["instance"] = scratch_org_info.get("Instance")
-        org_action_info["devhub"] = self.devhub
-        self.add_action_to_history(
-            OrgCreateAction(
-                **org_action_info,
+            scratch_org_info = res.get("ScratchOrgInfo", {})
+            org_action_info["status"] = "success"
+            org_action_info["org_id"] = self.org_id
+            org_action_info["sfdx_alias"] = self.sfdx_alias
+            org_action_info["username"] = self.username
+            org_action_info["login_url"] = scratch_org_info.get("LoginUrl")
+            org_action_info["instance"] = scratch_org_info.get("Instance")
+            org_action_info["devhub"] = self.devhub
+            self.add_action_to_history(
+                OrgCreateAction(
+                    **org_action_info,
+                )
             )
-        )
 
         if self.config.get("set_password"):
             self.generate_password()
@@ -187,31 +232,31 @@ class ScratchOrgConfig(SfdxOrgConfig):
         # Flag that this org has been created
         self.config["created"] = True
 
-    def _build_org_create_args(self) -> List[str]:
-        args = ["-f", self.config_file, "-w", "120"]
+    def _build_org_create_args(self, config_file_path: str | None = None) -> List[str]:
+        create_args = ["-f", config_file_path or self.config_file, "-w", "120"]
         devhub_username: Optional[str] = self._choose_devhub_username()
         if devhub_username:
-            args += ["--targetdevhubusername", devhub_username]
+            create_args += ["--targetdevhubusername", devhub_username]
         if not self.namespaced:
-            args += ["-n"]
+            create_args += ["-n"]
         if self.noancestors:
-            args += ["--noancestors"]
+            create_args += ["--noancestors"]
         if self.days:
-            args += ["--durationdays", str(self.days)]
+            create_args += ["--durationdays", str(self.days)]
         if self.release:
-            args += [f"release={self.release}"]
+            create_args += [f"release={self.release}"]
         if self.sfdx_alias:
-            args += ["-a", self.sfdx_alias]
+            create_args += ["-a", self.sfdx_alias]
         with open(self.config_file, "r") as org_def:
             org_def_data = json.load(org_def)
             org_def_has_email = "adminEmail" in org_def_data
         if self.email_address and not org_def_has_email:
-            args += [f"adminEmail={self.email_address}"]
+            create_args += [f"adminEmail={self.email_address}"]
         if self.default:
-            args += ["-s"]
+            create_args += ["-s"]
         if instance := self.instance or os.environ.get("SFDX_SIGNUP_INSTANCE"):
-            args += [f"instance={instance}"]
-        return args
+            create_args += [f"instance={instance}"]
+        return create_args
 
     def _choose_devhub_username(self) -> Optional[str]:
         """Determine which devhub username to specify when calling sfdx, if any."""

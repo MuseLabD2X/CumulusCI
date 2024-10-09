@@ -1,5 +1,6 @@
 import copy
 import json
+from collections import defaultdict, namedtuple
 from datetime import datetime
 from enum import Enum
 from logging import Logger
@@ -10,13 +11,15 @@ from jsonpath_ng import jsonpath, parse
 from pydantic import (
     BaseModel,
     DirectoryPath,
-    FilePath,
     Field,
+    FilePath,
     root_validator,
     validator,
 )
 from rich.text import Text
-from cumulusci.core.declarations import PackageType
+from cumulusci.core.declarations import (
+    PackageType,
+)
 from cumulusci.core.exceptions import (
     OrgHistoryError,
     OrgActionNotFound,
@@ -33,10 +36,16 @@ from cumulusci.utils.serialization import (
     encode_value,
 )
 from cumulusci.utils.yaml.render import yaml_dump
-from cumulusci.utils.version_strings import StepVersion, LooseVersion
+from cumulusci.utils.version_strings import (
+    LooseVersion,
+    StepVersion,
+    StrictVersion,
+)
 from cumulusci.utils.yaml.cumulusci_yml import Step, ScratchOrg
 from cumulusci.utils.yaml.model_parser import CCIModel
 from cumulusci.utils.masking import mask_in_json
+
+VersionInfo = namedtuple("VersionInfo", ["id", "number"])
 
 
 class OrgActionStatus(Enum):
@@ -84,7 +93,7 @@ def encode_path(obj):
 class ActionFileReference(BaseAction):
     """Model for tracking task that references to files in the repo"""
 
-    path: FilePath = Field(
+    path: FilePath | str = Field(
         ...,
         description="The state of the metadata before the task ran",
     )
@@ -101,12 +110,31 @@ class ActionFileReference(BaseAction):
         path = values.get("path")
         if path:
             values["hash"] = hash_obj(path)
+        # Pop the loading_from_history key if it exists
+        values.pop("loading_from_history", None)
         return values
+
+    # @validator("path", pre=True, always=True)
+    # def validate_path(cls, v, values, **kwargs):
+    #     if values.get("loading_from_history"):
+    #         # Skip validation if loading from history
+    #         return v
+    #     # Perform the usual validation
+    #     return FilePath.validate(v)
+
+    @classmethod
+    def from_history(cls, data: Dict[str, Any]) -> "ActionFileReference":
+        data["loading_from_history"] = True
+        return cls(**data)
 
 
 class ActionScratchDefReference(ActionFileReference):
     """Model for tracking task that references to scratch org definitions in the repo"""
 
+    source: Optional["ActionScratchDefReference"] = Field(
+        default=None,
+        description="The source scratch org definition used to create the org",
+    )
     scratchdef: Dict[str, Any] = Field(
         ...,
         description="The scratch org definition used to create the org",
@@ -115,7 +143,8 @@ class ActionScratchDefReference(ActionFileReference):
     @root_validator(pre=True)
     def populate_hash(cls, values):
         path = values.get("path")
-        if path:
+        scratchdef = values.get("scratchdef")
+        if path and not scratchdef:
             try:
                 with open(path, "r") as file:
                     values["scratchdef"] = json.load(file)
@@ -135,11 +164,23 @@ class ActionScratchDefReference(ActionFileReference):
         }
         return hash_obj(hash_content)
 
+    def to_snapshot_scratchdef(self, snapshot: str, description: str):
+        snapshot_scratchdef = copy.deepcopy(self.scratchdef)
+        snapshot_scratchdef["description"] = description
+        snapshot_scratchdef["snapshot"] = snapshot
+        if "features" in snapshot_scratchdef:
+            del snapshot_scratchdef["features"]
+        if "edition" in snapshot_scratchdef:
+            del snapshot_scratchdef["edition"]
+        if "shape" in snapshot_scratchdef:
+            del snapshot_scratchdef["shape"]
+        return snapshot_scratchdef
+
 
 class ActionDirectoryReference(BaseAction):
     """Model for tracking task that references to directories in the repo"""
 
-    path: DirectoryPath = Field(
+    path: DirectoryPath | str = Field(
         ...,
         description="The path of the directory in the repo referenced by the task",
     )
@@ -148,7 +189,7 @@ class ActionDirectoryReference(BaseAction):
         description="The hash of the directory contents",
     )
     option: Optional[str] = Field(
-        None,
+        default=None,
         description="The option used to pass the directory to the task",
     )
 
@@ -239,15 +280,15 @@ class ActionMetadataTransform(BaseAction):
         description="The hash of the metadata transformation",
     )
     retrieve: Optional[ActionMetadataRetrieve] = Field(
-        None,
+        default=None,
         description="The metadata deployment used to retrieve metadata",
     )
     deploy: Optional[ActionTransformMetadataDeploy] = Field(
-        None,
+        default=None,
         description="The metadata deployment used to deploy metadata",
     )
     diff: Optional[str] = Field(
-        None,
+        default=None,
         description="The diff of the retrieved vs deployed metadata",
     )
 
@@ -262,7 +303,7 @@ class BaseExternalZipMetadataDeploy(BaseMetadataApi):
     """Base class for tracking metadata deployments of zip file metadata not in the repo"""
 
     subfolder: Optional[str] = Field(
-        None,
+        default=None,
         description="The subfolder of the repository the metadata was deployed from",
     )
 
@@ -286,11 +327,11 @@ class ActionGithubMetadataDeploy(BaseExternalZipMetadataDeploy):
         description="The git ref of the metadata deployment",
     )
     branch: Optional[str] = Field(
-        None,
+        default=None,
         description="The branch of the repository the metadata was deployed from",
     )
     tag: Optional[str] = Field(
-        None,
+        default=None,
         description="The tag of the repository the metadata was deployed from",
     )
 
@@ -324,39 +365,39 @@ class ActionPackageInstall(BaseAction):
         description="The hash of the metadata deployment",
     )
     version_id: Optional[str] = Field(
-        None,
+        default=None,
         description="The package version ID (04t...)",
     )
     namespace: Optional[str] = Field(
-        None,
+        default=None,
         description="The namespace of the package",
     )
     package_id: Optional[str] = Field(
-        None,
+        default=None,
         description="The package ID",
     )
     name: Optional[str] = Field(
-        None,
+        default=None,
         description="The package name",
     )
     version: Optional[str] = Field(
-        None,
+        default=None,
         description="The package version number",
     )
     package_type: Optional[PackageType] = Field(
-        None,
+        default=None,
         description="The type of package",
     )
     is_beta: Optional[bool] = Field(
-        None,
+        default=None,
         description="Whether the package is a beta package",
     )
     is_promotable: Optional[bool] = Field(
-        None,
+        default=None,
         description="Whether the package is promotable",
     )
     ancestor_id: Optional[str] = Field(
-        None,
+        default=None,
         description="The ancestor package version ID",
     )
     # password: Optional[str] = MaskedField(
@@ -364,7 +405,7 @@ class ActionPackageInstall(BaseAction):
     #     description="The password for the package",
     # )
     activate_remote_site_settings: bool = Field(
-        False,
+        default=False,
         description="Whether to activate remote site settings",
     )
     name_conflict_resolution: NameConflictResolution = Field(
@@ -376,11 +417,11 @@ class ActionPackageInstall(BaseAction):
         description="The security type",
     )
     apex_compile_type: Optional[ApexCompileType] = Field(
-        None,
+        default=None,
         description="The Apex compile type",
     )
     upgrade_type: Optional[UpgradeType] = Field(
-        None,
+        default=None,
         description="The upgrade type",
     )
 
@@ -422,14 +463,17 @@ class ActionPackageInstall(BaseAction):
         )
         return values
 
+    def to_version_info(self) -> VersionInfo:
+        return VersionInfo(id=self.version_id, number=StrictVersion(self.version))
+
 
 class ActionPackageUpgrade(ActionPackageInstall):
     previous_version_id: Optional[str] = Field(
-        None,
+        default=None,
         description="The previous package version ID (04t...) if the package is an upgrade",
     )
     previous_version: Optional[str] = Field(
-        None,
+        default=None,
         description="The previous package version number if the package is an upgrade",
     )
 
@@ -450,26 +494,26 @@ class BaseOrgAction(BaseAction):
         description="The timestamp the action was run",
     )
     repo: Optional[str] = Field(
-        None,
+        default=None,
         description="The name of the repository the action was run against",
     )
     branch: Optional[str] = Field(
-        None,
+        default=None,
         description="The name of the branch the action was run against",
     )
     commit: Optional[str] = Field(
-        None,
+        default=None,
         description="The commit SHA the action was run against",
     )
 
 
 class BaseOrgActionResult(BaseOrgAction):
     hash_action: Optional[str] = Field(
-        None,
+        default=None,
         description="A unique hash for the action instance",
     )
     hash_config: Optional[str] = Field(
-        None,
+        default=None,
         description="A unique hash representing the action instance's configuration",
     )
     duration: float = Field(
@@ -485,7 +529,7 @@ class BaseOrgActionResult(BaseOrgAction):
         description="The log output of the action",
     )
     exception: Optional[str] = Field(
-        None,
+        default=None,
         description="The exception message if the action failed",
     )
 
@@ -603,31 +647,31 @@ class OrgCreateAction(BaseOrgActionResult, SFCLIOrgActionMixin):
         description="The scratch org configuration from cumulusci.yml's orgs -> scratch section.",
     )
     config: Optional[ActionScratchDefReference] = Field(
-        None,
+        default=None,
         description="The scratch org definition used to create the org",
     )
     org_id: Optional[str] = Field(
-        None,
+        default=None,
         description="The Salesforce org ID",
     )
     username: Optional[str] = Field(
-        None,
+        default=None,
         description="The username of the org",
     )
     devhub: Optional[str] = Field(
-        None,
+        default=None,
         description="The username of the Dev Hub org",
     )
     sfdx_alias: Optional[str] = Field(
-        None,
+        default=None,
         description="The alias of the org in the SF CLI keychain",
     )
     login_url: Optional[str] = Field(
-        None,
+        default=None,
         description="The instance URL of the org",
     )
     instance: Optional[str] = Field(
-        None,
+        default=None,
         description="The instance of the org",
     )
 
@@ -696,11 +740,11 @@ class BaseTaskAction(BaseAction):
         description="The name of the task",
     )
     description: Optional[str] = Field(
-        None,
+        default=None,
         description="The description of the task",
     )
     group: Optional[str] = Field(
-        None,
+        default=None,
         description="The group of the task",
     )
     class_path: str = Field(
@@ -712,7 +756,7 @@ class BaseTaskAction(BaseAction):
         description="The options passed to the task",
     )
     parsed_options: dict = Field(
-        {},
+        default={},
         description="The options after being parsed by the task",
     )
     files: Optional[List[ActionFileReference]] = Field(
@@ -728,7 +772,7 @@ class BaseTaskAction(BaseAction):
         description="The commands executed by the task",
     )
     deploys: Optional[ActionMetadataDeploys] = Field(
-        {},
+        default={},
         description="The metadata deployments executed by the task",
     )
     retrieves: Optional[List[ActionMetadataRetrieve]] = Field(
@@ -859,12 +903,12 @@ class BaseFlowAction(BaseAction):
         description="The name of the flow",
     )
     description: Optional[str] = Field(
-        None,
+        default=None,
         description="The description of the flow",
     )
 
     group: Optional[str] = Field(
-        None,
+        default=None,
         description="The group of the flow",
     )
     config_steps: Dict[StepVersion, Step] = Field(
@@ -913,7 +957,7 @@ class FlowActionStepTracker(BaseAction):
         description="The initialized task tracker for the step",
     )
     when: Optional[str] = Field(
-        None,
+        default=None,
         description="The condition for the step to run",
     )
 
@@ -1021,35 +1065,35 @@ class FilterOrgActions(BaseAction):
         ]
         | str
     ] = Field(
-        None,
+        default=None,
         description="Filter to only actions of the specified type(s)",
     )
     status: Optional[List[OrgActionStatus] | str] = Field(
-        None,
+        default=None,
         description="Filter to only actions with the specified status(es)",
     )
     action_hash: Optional[List[str] | str] = Field(
-        None,
+        default=None,
         description="Filter to only actions with the specified action hash(es)",
     )
     config_hash: Optional[List[str] | str] = Field(
-        None,
+        default=None,
         description="Filter to only actions with the specified config hash(es)",
     )
     exclude_action_hash: Optional[List[str] | str] = Field(
-        None,
+        default=None,
         description="Exclude actions with the specified action hash(es)",
     )
     exclude_config_hash: Optional[List[str] | str] = Field(
-        None,
+        default=None,
         description="Exclude actions with the specified config hash(es)",
     )
     before: Optional[str] = Field(
-        None,
+        default=None,
         description="Filter to only actions before the specified action hash",
     )
     after: Optional[str] = Field(
-        None,
+        default=None,
         description="Filter to only actions after the specified action hash",
     )
 
@@ -1058,7 +1102,7 @@ class BaseOrgHistory(BaseAction):
     """Base model for tracking the history of actions against an org instance"""
 
     hash_config: Optional[str] = Field(
-        None,
+        default=None,
         description="A unique hash representing the complete configuration of the org",
     )
 
@@ -1071,9 +1115,17 @@ class BaseOrgHistory(BaseAction):
         hash_data = [action.hash_config for action in self.actions]
         return hash_obj(hash_data)
 
+    def jsonpath_query(
+        self,
+        jsonpath: str,
+    ):
+        query = parse(jsonpath)
+        return query.find(self.dict(value_only=True))
+
     def filtered_actions(
         self,
         filters: FilterOrgActions,
+        jsonpath: Optional[str] = None,
     ) -> List[OrgActionType]:
         """Return a list of actions that match the provided filters"""
 
@@ -1125,6 +1177,13 @@ class BaseOrgHistory(BaseAction):
             actions = [a for a in actions if a.hash_action < filters.before]
         if filters.after is not None:
             actions = [a for a in actions if a.hash_action > filters.after]
+
+        if jsonpath:
+            import pdb
+
+            pdb.set_trace()
+            query = parse(jsonpath)
+            actions = [match.value for match in query.find(actions)]
         return actions
 
     def get_org_actions(self, org_id: str = None) -> List[OrgActionType]:
@@ -1210,13 +1269,90 @@ class BaseOrgHistory(BaseAction):
             return hashes
         return hash_obj(hashes)
 
-    def clear_history(
+    def _clear_history(
         self,
-        filters: FilterOrgActions,
         logger: Logger,
+        filters: FilterOrgActions = None,
     ):
         """Clear the org's history"""
-        logger.info(f"Starting length: {len(self.history.actions)}")
+        logger.info(f"Starting length: {len(self.actions)}")
+
+        if isinstance(filters, dict):
+            filters = FilterOrgActions.parse_obj(filters)
+
+        actions = self.filtered_actions(filters)
+        for action in actions:
+            logger.warning(f"Removing {action.action_type} action: {action}")
+            self.actions.remove(action)
+
+        self.hash_config = self.calculate_config_hash()
+        logger.info(f"Recalculated history config hash: {self.hash_config}")
+
+        logger.info(f"Ending length: {len(self.actions)}")
+
+    def get_installed_packages(self) -> defaultdict:
+        """Returns a defaultdict of installed packages with keys of package_id, namespace, and namespace@version
+        consistent with OrgConfig.installed_packages structure
+        """
+        installed_packages = defaultdict(list)
+        for action in self.filtered_actions(
+            filters=FilterOrgActions(action_type=["Flow", "Task"], status="success")
+        ):
+            if action.action_type == "Task":
+                tasks = [action]
+            else:
+                tasks = [step.task for step in action.steps]
+            for task in tasks:
+                if not task.package_installs:
+                    continue
+                for package_install in task.package_installs:
+                    version_info = package_install.to_version_info()
+
+                    # Add to the defaultdict using different keys
+                    if package_install.package_id:
+                        installed_packages[package_install.package_id].append(
+                            version_info
+                        )
+                    if package_install.namespace:
+                        installed_packages[package_install.namespace].append(
+                            version_info
+                        )
+                        installed_packages[
+                            f"{package_install.namespace}@{package_install.version}"
+                        ].append(version_info)
+
+        return installed_packages
+
+
+class PreviousOrgHistory(BaseOrgHistory):
+    """Model for tracking the history of actions run against a previous org instance"""
+
+    org_config: Optional[dict] = Field(
+        default=None,
+        description="The config of the previous org",
+    )
+
+
+class OrgHistory(BaseOrgHistory):
+    """Model for tracking the history of actions run against a CumulusCI org profile"""
+
+    org_id: Optional[str] = Field(
+        default=None,
+        description="The Salesforce org ID",
+    )
+    previous_orgs: Dict[str, PreviousOrgHistory] = Field(
+        {},
+        description="The previous orgs that were created and deleted and their action history.",
+    )
+
+    def clear_history(
+        self,
+        logger: Logger,
+        filters: FilterOrgActions = None,
+        org_id: Optional[str] = None,
+    ):
+        """Clear the org's history"""
+        logger.info(f"Starting length: {len(self.actions)}")
 
         if isinstance(filters, dict):
             filters = FilterOrgActions.parse_obj(filters)
@@ -1226,41 +1362,7 @@ class BaseOrgHistory(BaseAction):
         else:
             history = self.history
 
-        actions = history.filtered_actions(filters)
-        for action in actions:
-            logger.warning(f"Removing {action.action_type} action: {action}")
-            history.actions.remove(action)
-
-        if org_id:
-            history.hash_config = history.calculate_config_hash()
-        self.history.hash_config = self.history.calculate_config_hash()
-        logger.info(f"Recalculated history config hash: {self.history.hash_config}")
-
-        self.logger.info(f"Ending length: {len(self.history.actions)}")
-        self.config["history"] = self.history.dict()
-        self.save()
-
-
-class PreviousOrgHistory(BaseOrgHistory):
-    """Model for tracking the history of actions run against a previous org instance"""
-
-    org_config: Optional[dict] = Field(
-        None,
-        description="The config of the previous org",
-    )
-
-
-class OrgHistory(BaseOrgHistory):
-    """Model for tracking the history of actions run against a CumulusCI org profile"""
-
-    org_id: Optional[str] = Field(
-        None,
-        description="The Salesforce org ID",
-    )
-    previous_orgs: Dict[str, PreviousOrgHistory] = Field(
-        {},
-        description="The previous orgs that were created and deleted and their action history.",
-    )
+        history._clear_history(logger, filters)
 
     def lookup_org(
         self, org_id: str | None = None
@@ -1310,18 +1412,19 @@ class OrgHistory(BaseOrgHistory):
     def filtered_actions(
         self,
         filters: FilterOrgActions,
+        jsonpath: Optional[str] = None,
         org_id: Optional[str] = None,
     ) -> List[OrgActionType]:
         if org_id:
             # For previous orgs, pass off to their history
             try:
                 history = self.previous_orgs[org_id]
-                return history.filtered_actions(filters)
+                return history.filtered_actions(filters, jsonpath)
             except KeyError:
                 raise OrgActionNotFound(
                     f"Org with ID {org_id} not found in org history"
                 )
-        return super().filtered_actions(filters)
+        return super().filtered_actions(filters, jsonpath)
 
     @classmethod
     def parse_obj(cls, obj):

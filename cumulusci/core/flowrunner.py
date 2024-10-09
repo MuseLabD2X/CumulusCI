@@ -73,6 +73,7 @@ from jinja2.sandbox import ImmutableSandboxedEnvironment
 from cumulusci.core.config import FlowConfig, TaskConfig
 from cumulusci.core.config.org_config import OrgConfig
 from cumulusci.core.org_history import (
+    ActionScratchDefReference,
     OrgActionStatus,
     FlowOrgAction,
     FlowActionStep,
@@ -88,7 +89,10 @@ from cumulusci.core.exceptions import (
     FlowInfiniteLoopError,
     TaskImportError,
 )
+from cumulusci.salesforce_api.snapshot import SnapshotManager
+from cumulusci.core.sfdx import get_devhub_api
 from cumulusci.utils import cd
+from cumulusci.utils.hashing import hash_obj
 from cumulusci.utils.version_strings import StepVersion
 
 if TYPE_CHECKING:
@@ -407,7 +411,9 @@ class FlowCoordinator:
     results: List[StepResult]
     tracker: FlowActionTracker
     action: FlowOrgAction | None
+    predict_org_config: Optional[OrgConfig] | None
     use_snapshots: bool = False
+    force_use_snapshots: bool = False
 
     def __init__(
         self,
@@ -419,11 +425,15 @@ class FlowCoordinator:
         skip_from: Optional[List[str]] = None,
         start_from: Optional[str] = None,
         callbacks: Optional[FlowCallback] = None,
+        predict_org_config: Optional[OrgConfig] = None,
+        use_snapshots: Optional[bool] = None,
+        force_use_snapshots: Optional[bool] = None,
     ):
         self.project_config = project_config
         self.flow_config = flow_config
         self.name = name
         self.org_config = None
+        self.predict_org_config = predict_org_config
 
         if not callbacks:
             callbacks = FlowCallback()
@@ -455,6 +465,18 @@ class FlowCoordinator:
             commit=self.project_config.repo_commit,
         )
         self.action = None
+        self.force_use_snapshots = force_use_snapshots
+        self.use_snapshots = all(
+            [
+                use_snapshots,
+                self.flow_config.use_snapshots,
+            ]
+        )
+        if not self.use_snapshots and force_use_snapshots:
+            self.logger.warning(
+                "force_use_snapshots is set to True but the flow is set to False, overriding flow `use_snapshots` setting."
+            )
+            self.use_snapshots = True
 
     @classmethod
     def from_steps(
@@ -586,7 +608,12 @@ class FlowCoordinator:
                 steps.extend(task.freeze(step))
         return steps
 
-    def run(self, org_config: OrgConfig):
+    def run(
+        self,
+        org_config: OrgConfig,
+        predictions: Optional[List[StepPrediction]] = None,
+        continue_from_path: Optional[str] = None,
+    ):
         self.org_config = org_config
         line = f"Initializing flow: {self.__class__.__name__}"
         if self.name:
@@ -596,7 +623,20 @@ class FlowCoordinator:
         self.logger.info(self.flow_config.description)
         self._rule(new_line=True)
 
+        # Handle snapshot lookup
+        if self.use_snapshots and predictions is None:
+            self._init_org(predict=True)
+            self._rule(fill="-")
+            self.logger.info("Running prediction to look for active snapshots to use")
+            self._rule(fill="-", new_line=True)
+            self.org_config.use_snapshot = True
+            predictions = self.predict(org_config)
+            self.org_config = self.predict_snapshot(org_config, predictions)
+        else:
+            self.org_config = org_config
+
         self._init_org()
+
         self._rule(fill="-")
         self.logger.info("Organization:")
         self.logger.info(f"  Username: {org_config.username}")
@@ -631,8 +671,121 @@ class FlowCoordinator:
         finally:
             self.callbacks.post_flow(self)
 
+    def predict_snapshot(
+        self, org_config: OrgConfig, predictions: List[StepPrediction]
+    ):
+        """Uses a flow's predictions to determine the best snapshot to use for a scratch org"""
+        predicted_snapshots = []
+        tracker = {
+            "deploys": [],
+            "package_installs": [],
+            "transforms": [],
+        }
+        snapshot_hashes = []
+        scratch_config = ActionScratchDefReference(path=self.org_config.config_file)
+
+        snapshot_hash_content = {
+            "org_shape": scratch_config.get_snapshot_shape_hash(),
+            "tracker": tracker,
+        }
+
+        for prediction in predictions:
+            if not prediction or not prediction.tracker:
+                continue
+            step_hash_content = prediction.tracker.get_org_tracker_hash(
+                return_data=True
+            )
+            if not step_hash_content:
+                continue
+            tracker["deploys"].extend(step_hash_content["deploys"])
+            tracker["package_installs"].extend(step_hash_content["package_installs"])
+            tracker["transforms"].extend(step_hash_content["transforms"])
+
+            snapshot_hashes.append(
+                {
+                    "path": prediction.path,
+                    "tracker_hash": hash_obj(step_hash_content),
+                    "snapshot_hash": hash_obj(snapshot_hash_content),
+                    "content": step_hash_content,
+                }
+            )
+
+        if snapshot_hashes:
+            self.logger.info(
+                "Identified {} snapshot hashes to check for in the DevHub".format(
+                    len(snapshot_hashes)
+                )
+            )
+            self.logger.info(
+                "Getting access token for the DevHub to check for snapshots..."
+            )
+            devhub_api = get_devhub_api(
+                project_config=self.project_config, api_version="61.0"
+            )  # API Version for GA of OrgSnapshots
+            snapshots = SnapshotManager(devhub_api, logger=self.logger)
+            res = snapshots.query(
+                snapshot_names=[
+                    f"CCI{step['snapshot_hash']}" for step in snapshot_hashes
+                ],
+                status="Active",
+            )
+
+            # Query active snapshots with matching hashes and build active_snapshots dict
+            active_snapshots = {}
+            if res["records"]:
+                for snapshot in res["records"]:
+                    for part in snapshot["Description"].split(" "):
+                        if part.startswith("hash:"):
+                            active_snapshots[part.split(":")[1]] = snapshot
+
+            self._rule(fill="-")
+            self.logger.info(f"Found {len(active_snapshots)} active snapshots to use")
+            self._rule(fill="-")
+            self.logger.info(f"Determining best snapshot...")
+
+            # Check the step hashes against the active snapshots and set the snapshot name for the first snapshot found
+            for snapshot in snapshot_hashes:
+                if snapshot["snapshot_hash"] in active_snapshots:
+                    active = active_snapshots[snapshot["snapshot_hash"]]
+                    # Merge the hash info into the snapshot info
+                    predicted_snapshot = dict(snapshot.items())
+                    predicted_snapshot["snapshot"] = active
+                    predicted_snapshots.append(predicted_snapshot)
+
+                else:
+                    self.logger.info(
+                        f"No active snapshot found for {snapshot['path']} hash {snapshot['snapshot_hash']}"
+                    )
+
+            if predicted_snapshots:
+                self._rule(fill="-")
+                self.logger.info("Predicted Snapshot Matches")
+                self._rule(fill="-", new_line=True)
+                for predicted in predicted_snapshots:
+                    self.logger.info(
+                        f"Predicted snapshot for {predicted['path']} with hash {predicted['snapshot_hash']}\n"
+                        f"  Snapshot: {predicted['snapshot']['SnapshotName']} ({predicted['snapshot']['Id']})\n"
+                        f"  Description: {predicted['snapshot']['Description']}\n\n"
+                    )
+                self._rule(fill="-", new_line=True)
+
+                self.logger.info(
+                    f"Using snapshot {predicted['snapshot']['SnapshotName']} ({predicted['snapshot']['Id']}) to create org"
+                )
+                org_config.snapshot_hashes = predicted_snapshots
+                org_config.use_snapshot_hashes = True
+            else:
+                self.logger.warning(
+                    "No snapshots found to use. Skipping snapshot and creating a new scratch org."
+                )
+
+        else:
+            self.logger.warning(
+                "No snapshots found to use. Skipping snapshot and creating a new scratch org."
+            )
+        return org_config
+
     def predict(self, org_config: OrgConfig) -> List[StepPrediction]:
-        self.org_config = org_config
         line = f"Initializing flow for prediction only: {self.__class__.__name__}"
         if self.name:
             line = f"{line} ({self.name})"
@@ -641,7 +794,31 @@ class FlowCoordinator:
         self.logger.info(self.flow_config.description)
         self._rule(new_line=True)
 
-        # self._init_org()
+        # Use the passed org_config for prediction or construct one from the org config
+        if self.predict_org_config is None:
+            self.predict_org_config = OrgConfig(
+                name=org_config.config_name,
+                config={
+                    "active": False,
+                    "config_name": org_config.config_name,
+                    "config_file": org_config.config_file,
+                    "created": False,
+                    "days": org_config.days,
+                    "is_sandbox": org_config.is_sandbox,
+                    "namespace": org_config.namespace,
+                    "namespaced": org_config.namespaced,
+                    "org_type": org_config.org_type,
+                    "scratch": org_config.scratch,
+                    "scratch_org_type": org_config.scratch_org_type,
+                },
+            )
+        self.predict_org_config._installed_packages = defaultdict(list)
+        # self.predict_org_config.installed_packages = lambda x: x._installed_packages
+        # Prevent token refresh
+        self.predict_org_config.refresh_oauth_token = lambda x: None
+
+        self.org_config = self.predict_org_config
+        self._init_org(predict=True)
 
         # Give pre_flow callback a chance to alter the steps
         # based on the state of the org before we display the steps.
@@ -657,10 +834,28 @@ class FlowCoordinator:
         self._rule(new_line=True)
 
         predictions = []
+        installed = defaultdict(list)
         try:
             for step in self.steps:
                 prediction = self._run_step(step, predict=True)
+                if prediction and prediction.tracker:
+                    if prediction.tracker.package_installs:
+                        for package_install in prediction.tracker.package_installs:
+                            version_info = package_install.to_version_info()
+                            # Add to the defaultdict using different keys
+                            if package_install.package_id:
+                                installed[package_install.package_id].append(
+                                    version_info
+                                )
+                            if package_install.namespace:
+                                installed[package_install.namespace].append(
+                                    version_info
+                                )
+                                installed[
+                                    f"{package_install.namespace}@{package_install.version}"
+                                ].append(version_info)
                 predictions.append(prediction)
+                self.org_config._installed_packages = installed.copy()
             flow_name = f"'{self.name}' " if self.name else ""
             self.logger.info(
                 f"Completed flow {flow_name} prediction for org {org_config.name} successfully!"
@@ -938,14 +1133,36 @@ class FlowCoordinator:
                 self._check_infinite_flows(next_flow_config, flow_stack)
                 flow_stack.pop()
 
-    def _init_org(self):
+    def _init_org(self, predict: bool = False):
         """Test and refresh credentials to the org specified."""
-        self.logger.info(
-            f"Verifying and refreshing credentials for the specified org: {self.org_config.name}."
-        )
-
+        if (
+            self.org_config
+            and not self.org_config.use_snapshots
+            and self.force_use_snapshots
+        ):
+            if not self.use_snapshots:
+                self.logger.info(
+                    "Overriding org config use_snapshots setting to True for this flow because of `force_use_snapshots`."
+                )
+                self.use_snapshots = True
+        if self.org_config and self.use_snapshots and not self.org_config.scratch:
+            raise FlowConfigError(
+                "The use_snapshots option is only available for scratch orgs."
+            )
+        if self.org_config and self.use_snapshots and self.org_config.active:
+            raise FlowConfigError(
+                "The use_snapshots option is not available for active orgs. Use `cci org scratch_delete <org_name>` to delete the org and create a new snapshot."
+            )
         # attempt to refresh the token, this can throw...
+        if predict:
+            self.logger.info(
+                f"Skipping org credentials verification and refresh for prediction."
+            )
+            return
         with self.org_config.save_if_changed():
+            self.logger.info(
+                f"Verifying and refreshing credentials for the specified org: {self.org_config.name}."
+            )
             self.org_config.refresh_oauth_token(self.project_config.keychain)
 
     def resolve_return_value_options(self, options):

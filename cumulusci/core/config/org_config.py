@@ -1,5 +1,6 @@
 import os
 import re
+import traceback
 from collections import defaultdict, namedtuple
 from contextlib import contextmanager
 from datetime import date, datetime
@@ -10,7 +11,11 @@ from simple_salesforce import Salesforce
 from simple_salesforce.exceptions import SalesforceError, SalesforceResourceNotFound
 
 from cumulusci.core.config import BaseConfig
-from cumulusci.core.org_history import FilterOrgActions, OrgHistory
+from cumulusci.core.org_history import (
+    FilterOrgActions,
+    OrgHistory,
+    VersionInfo,
+)
 from cumulusci.core.exceptions import (
     CumulusCIException,
     DependencyResolutionError,
@@ -27,9 +32,6 @@ from cumulusci.utils.version_strings import StrictVersion
 SKIP_REFRESH = os.environ.get("CUMULUSCI_DISABLE_REFRESH")
 SANDBOX_MYDOMAIN_RE = re.compile(r"\.cs\d+\.my\.(.*)salesforce\.com")
 MYDOMAIN_RE = re.compile(r"\.my\.(.*)salesforce\.com")
-
-
-VersionInfo = namedtuple("VersionInfo", ["id", "number"])
 
 
 class OrgConfig(BaseConfig):
@@ -70,6 +72,11 @@ class OrgConfig(BaseConfig):
     createable: bool = None
     history: OrgHistory = None
 
+    use_snapshot_hashes: bool = None
+    snapshot_hashes: list = None
+    snapshot_name: str = None  # For storing the actual snapshot name used
+    snapshot_id: str = None  # For storing the actual snapshot id used
+
     # make sure it can be mocked for tests
     OAuth2Client = OAuth2Client
 
@@ -85,17 +92,14 @@ class OrgConfig(BaseConfig):
         self._is_person_accounts_enabled = None
         self._multiple_currencies_is_enabled = False
         history_exception = None
-        # try:
-        config_history = config.get("history", {})
-        if config.get("org_id"):
-            config_history["org_id"] = config["org_id"]
+        try:
+            config_history = config.get("history", {})
+            if config.get("org_id"):
+                config_history["org_id"] = config["org_id"]
 
-        self.history = OrgHistory.parse_obj(config_history)
-        # except Exception as e:
-        #     import pdb
-
-        #     pdb.set_trace()
-        #     history_exception = e
+            self.history = OrgHistory.parse_obj(config_history)
+        except Exception as e:
+            history_exception = e
 
         super().__init__(config)
 
@@ -104,6 +108,7 @@ class OrgConfig(BaseConfig):
                 self.logger.error(
                     f"Failed to load history for org {name}: {history_exception}. Disabiling track_history to avoid data loss."
                 )
+                self.logger.error(traceback.format_exc())
             else:
                 raise OrgHistoryError(
                     f"Failed to load history for org {name}: {history_exception}."
@@ -633,23 +638,10 @@ class OrgConfig(BaseConfig):
         if isinstance(filters, dict):
             filters = FilterOrgActions.parse_obj(filters)
 
-        if org_id:
-            history = self.previous_orgs[org_id]
-        else:
-            history = self.history
-
-        actions = history.filtered_actions(filters)
-        for action in actions:
-            self.logger.warning(f"Removing {action.action_type} action: {action}")
-            history.actions.remove(action)
-
-        if org_id:
-            history.hash_config = history.calculate_config_hash()
-        self.history.hash_config = self.history.calculate_config_hash()
-        self.logger.info(
-            f"Recalculated history config hash: {self.history.hash_config}"
+        self.history.clear_history(
+            filters=filters,
+            org_id=org_id,
+            logger=self.logger,
         )
-
-        self.logger.info(f"Ending length: {len(self.history.actions)}")
         self.config["history"] = self.history.dict()
         self.save()

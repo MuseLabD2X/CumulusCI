@@ -161,6 +161,7 @@ class ScratchOrg(CCIDictModel):
     noancestors: bool = None
     release: Literal["preview", "previous"] = None
     track_history: bool = False
+    use_snapshots: bool = False
 
 
 class Orgs(CCIDictModel):

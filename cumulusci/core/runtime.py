@@ -105,6 +105,7 @@ class BaseCumulusCI:
         skip: Optional[List[str]] = None,
         skip_from: Optional[str] = None,
         start_from: Optional[str] = None,
+        force_use_snapshots: bool = False,
     ) -> FlowCoordinator:
         """Get a primed and ready-to-go flow coordinator."""
         if not self.project_config:
@@ -120,5 +121,6 @@ class BaseCumulusCI:
             skip_from=skip_from or flow_config.skip_from,
             start_from=start_from or flow_config.start_from,
             callbacks=callbacks,
+            force_use_snapshots=force_use_snapshots,
         )
         return coordinator

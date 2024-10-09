@@ -367,7 +367,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceApiTask):
 
         if self.parsed_options.snapshot_id:
             self.logger.info(
-                "Finalizing scratch org snapshot creation for {}".format(
+                "Finalizing scratch org snapshot creation for {}\n".format(
                     self.parsed_options.snapshot_id
                 )
             )
@@ -698,7 +698,7 @@ class CreateHashedSnapshot(BaseCreateOrgSnapshot):
             self.snapshot_name = self._generate_snapshot_name()
 
     def _generate_snapshot_name(self, name: str | None = None):
-        name = f"DEP{self.parsed_options.snapshot_hash}"
+        name = f"CCI{self.parsed_options.snapshot_hash}"
         return super()._generate_snapshot_name(name)
 
     def _should_create_snapshot(self):

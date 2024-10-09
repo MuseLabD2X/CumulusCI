@@ -341,6 +341,10 @@ def org_info(runtime, org_name, print_json):
             "set_password",
             "serialization_format",  # only during the transition
             "sfdx_alias",
+            "snapshot_hashes",
+            "snapshot_id",
+            "snapshot_name",
+            "use_snapshot_hashes",
             "username",
         }
         keys = ui_key_set.intersection(org_config.config.keys())

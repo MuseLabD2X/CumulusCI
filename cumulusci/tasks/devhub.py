@@ -1,9 +1,6 @@
-import json
 from pydantic import BaseModel, Field
-from cumulusci.tasks.salesforce import BaseSalesforceTask
-from cumulusci.core.exceptions import DevhubAuthError
-from cumulusci.core.sfdx import sfdx
-from cumulusci.salesforce_api.utils import get_simple_salesforce_connection
+from cumulusci.core.sfdx import get_devhub_api
+from cumulusci.core.tasks import BaseTask
 
 
 class DevHubOrgConfig(BaseModel):
@@ -19,7 +16,7 @@ class DevHubOrgConfig(BaseModel):
     )
 
 
-class BaseDevhubTask(BaseSalesforceTask):
+class BaseDevhubTask(BaseTask):
     """Base class for tasks that need DevHub access."""
 
     def _init_task(self):
@@ -28,51 +25,9 @@ class BaseDevhubTask(BaseSalesforceTask):
         self.devhub = self._get_devhub_api()
 
     def _get_devhub_api(self, base_url=None):
-        self.logger.info("Getting Dev Hub access token")
-        p = sfdx(
-            "config get target-dev-hub --json",
-        )
-        try:
-            result = p.stdout_text.read()
-            data = json.loads(result)
-            devhub_username = data["result"][0]["value"]
-        except json.JSONDecodeError:
-            raise DevhubAuthError(
-                f"Failed to parse SFDX output: {p.stdout_text.read()}"
-            )
-        except KeyError:
-            raise DevhubAuthError(
-                f"Failed to get Dev Hub username from sfdx. Please use `sfdx force:config:set target-dev-hub=<username>` to set the target Dev Hub org."
-            )
-
-        p = sfdx(
-            f"force:org:display --json",
-            username=devhub_username,
-            log_note="Getting Dev Hub org info",
-        )
-
-        try:
-            devhub_info = json.loads(p.stdout_text.read())
-        except json.JSONDecodeError:
-            raise DevhubAuthError(
-                f"Failed to parse SFDX output: {p.stdout_text.read()}"
-            )
-
-        if "result" not in devhub_info:
-            raise DevhubAuthError(
-                f"Failed to get Dev Hub information from sfdx: {devhub_info}"
-            )
-        devhub = DevHubOrgConfig(
-            access_token=devhub_info["result"]["accessToken"],
-            instance_url=devhub_info["result"]["instanceUrl"],
-        )
-        return get_simple_salesforce_connection(
+        self.logger.info("Getting DevHub API for the default Dev Hub org")
+        return get_devhub_api(
             project_config=self.project_config,
-            org_config=devhub,
-            api_version=(
-                self.api_version
-                if hasattr(self, "api_version")
-                else self.project_config.project__package__api_version
-            ),
+            api_version=self.api_version if hasattr(self, "api_version") else None,
             base_url=base_url,
         )

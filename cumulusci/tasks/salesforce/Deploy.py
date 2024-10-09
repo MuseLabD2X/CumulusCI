@@ -182,11 +182,6 @@ class Deploy(BaseSalesforceMetadataApiTask):
     def _has_namespaced_package(self, ns: Optional[str]) -> bool:
         if "unmanaged" in self.options:
             return not process_bool_arg(self.options.get("unmanaged", True))
-        if self.predict:
-            self.logger.warning(
-                "The unmanaged option is not set. Assuming the package is managed."
-            )
-            return False
         return bool(ns) and ns in self.org_config.installed_packages
 
     def _is_namespaced_org(self, ns: Optional[str]) -> bool:

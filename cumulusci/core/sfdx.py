@@ -12,6 +12,11 @@ from zipfile import ZipFile
 
 import sarge
 
+from pydantic import BaseModel, Field
+from cumulusci.core.exceptions import DevhubAuthError
+from cumulusci.salesforce_api.utils import get_simple_salesforce_connection
+
+
 from cumulusci.core.enums import StrEnum
 from cumulusci.core.exceptions import SfdxOrgException
 from cumulusci.utils import temporary_dir
@@ -152,3 +157,65 @@ def convert_sfdx_source(
             )
 
         yield mdapi_path or path
+
+
+class DevHubOrgConfig(BaseModel):
+    """
+    Basic model for mimicking the org config for the Dev Hub org to
+    create a simple-salesforce connection.
+    """
+
+    access_token: str = Field(
+        ...,
+        description="Access token for the Dev Hub org",
+    )
+    instance_url: str = Field(
+        ...,
+        description="Instance URL for the Dev Hub org",
+    )
+
+
+def get_devhub_api(project_config, api_version: str | None = None, base_url=None):
+    """Returns a simple-salesforce connection to the default Dev Hub org
+    as configured by Salesforce CLI's target-dev-hub config parameter."""
+    p = sfdx(
+        "config get target-dev-hub --json",
+    )
+    try:
+        result = p.stdout_text.read()
+        data = json.loads(result)
+        devhub_username = data["result"][0]["value"]
+    except json.JSONDecodeError:
+        raise DevhubAuthError(f"Failed to parse SFDX output: {p.stdout_text.read()}")
+    except KeyError:
+        raise DevhubAuthError(
+            f"Failed to get Dev Hub username from sfdx. Please use `sfdx force:config:set target-dev-hub=<username>` to set the target Dev Hub org."
+        )
+
+    p = sfdx(
+        f"force:org:display --json",
+        username=devhub_username,
+        log_note="Getting Dev Hub org info",
+    )
+
+    try:
+        devhub_info = json.loads(p.stdout_text.read())
+    except json.JSONDecodeError:
+        raise DevhubAuthError(f"Failed to parse SFDX output: {p.stdout_text.read()}")
+
+    if "result" not in devhub_info:
+        raise DevhubAuthError(
+            f"Failed to get Dev Hub information from sfdx: {devhub_info}"
+        )
+    devhub = DevHubOrgConfig(
+        access_token=devhub_info["result"]["accessToken"],
+        instance_url=devhub_info["result"]["instanceUrl"],
+    )
+    return get_simple_salesforce_connection(
+        project_config=project_config,
+        org_config=devhub,
+        api_version=(
+            api_version if api_version else project_config.project__package__api_version
+        ),
+        base_url=base_url,
+    )

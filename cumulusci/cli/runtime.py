@@ -23,7 +23,7 @@ class CliRuntime(BaseCumulusCI):
             super(CliRuntime, self).__init__(*args, **kwargs)
         except ConfigError as e:
             raise click.UsageError(f"Config Error: {str(e)}")
-        except (KeychainKeyNotFound) as e:
+        except KeychainKeyNotFound as e:
             raise click.UsageError(f"Keychain Error: {str(e)}")
 
     def get_keychain_class(self):
@@ -92,13 +92,14 @@ class CliRuntime(BaseCumulusCI):
         elif sys.platform.startswith("linux"):
             return ["notify-send", "--icon=utilities-terminal", "CumulusCI", message]
 
-    def get_org(self, org_name=None, fail_if_missing=True):
+    def get_org(self, org_name=None, fail_if_missing=True, check_expired: bool = True):
         if org_name:
             org_config = self.keychain.get_org(org_name)
         else:
             org_name, org_config = self.keychain.get_default_org()
         if org_config:
-            org_config = self.check_org_expired(org_name, org_config)
+            if not check_expired:
+                org_config = self.check_org_expired(org_name, org_config)
         elif fail_if_missing:
             raise click.UsageError("No org specified and no default org set.")
         return org_name, org_config
