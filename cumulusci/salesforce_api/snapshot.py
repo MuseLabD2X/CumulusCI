@@ -1,6 +1,6 @@
 import os
 import time
-from typing import Optional
+from typing import List, Optional, Union
 from datetime import datetime, timedelta
 from pydantic import BaseModel, validator
 from rich.console import Console
