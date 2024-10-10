@@ -6,7 +6,7 @@ import runpy
 import sys
 import traceback
 
-import click
+from cumulusci.cli.runtime import click
 import requests
 import rich
 from rich.console import Console

@@ -4,7 +4,7 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
-import click
+from cumulusci.cli.runtime import click
 import github3
 
 import cumulusci

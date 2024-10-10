@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 from typing import Dict
 
-import click
+from cumulusci.cli.runtime import click
 from jinja2 import Environment, PackageLoader
 
 import cumulusci

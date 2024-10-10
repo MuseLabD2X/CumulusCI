@@ -47,6 +47,7 @@ dependencies = [
     "requests",
     "requests-futures",
     "rich",
+    "rich_click",
     "robotframework",
     "robotframework-pabot",
     "robotframework-requests",

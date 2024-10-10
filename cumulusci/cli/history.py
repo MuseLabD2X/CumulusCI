@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timedelta
 from dateutil.parser import parse
 
-import click
+from cumulusci.cli.runtime import click
 from rich.console import Console
 from rich.text import Text
 from rich.table import Table

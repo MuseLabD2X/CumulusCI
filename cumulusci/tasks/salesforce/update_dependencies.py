@@ -1,7 +1,7 @@
 import os
 from typing import List
 
-import click
+from cumulusci.cli.runtime import click
 
 from cumulusci.core.declarations import (
     FilesDeclaration,

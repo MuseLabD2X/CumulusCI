@@ -17,6 +17,7 @@ from rich.progress import (
 )
 from rich.table import Table
 from rich.text import Text
+from simple_salesforce import format_soql
 from simple_salesforce.exceptions import SalesforceResourceNotFound
 from cumulusci.core.exceptions import (
     SalesforceException,
@@ -82,42 +83,46 @@ class SnapshotManager:
         where_clauses = []
         params = {}
 
+        if status and isinstance(status, str):
+            status = [status]
+
         if snapshot_id:
-            where_clauses.append("Id = :snapshot_id")
+            where_clauses.append("Id = {snapshot_id}")
             params["snapshot_id"] = snapshot_id
 
         if snapshot_ids:
-            where_clauses.append("Id IN :snapshot_ids")
+            where_clauses.append("Id IN {snapshot_ids}")
             params["snapshot_ids"] = tuple(snapshot_ids)
 
         if snapshot_name:
-            where_clauses.append("SnapshotName = :snapshot_name")
+            where_clauses.append("SnapshotName = {snapshot_name}")
             params["snapshot_name"] = snapshot_name
 
         if snapshot_names:
-            where_clauses.append("SnapshotName IN :snapshot_names")
+            where_clauses.append("SnapshotName IN {snapshot_names}")
             params["snapshot_names"] = tuple(snapshot_names)
 
         if description:
-            where_clauses.append("Description LIKE :description")
+            where_clauses.append("Description LIKE {description}")
             params["description"] = f"%{description}%"
 
         if status:
             if isinstance(status, str):
                 status = [status]
-            where_clauses.append("Status IN :status")
+            where_clauses.append("Status IN {status}")
             params["status"] = tuple(status)
-
+        where_clauses = format_soql(" AND ".join(where_clauses), **params)
         self.logger.info(f"Querying snapshots with filters: {where_clauses}")
 
         if where_clauses:
-            query += " WHERE " + " AND ".join(where_clauses)
+            query += " WHERE " + where_clauses
 
         if limit:
-            query += " LIMIT :limit"
+            query += " LIMIT {limit}"
             params["limit"] = limit
+        query = format_soql(query, **params)
 
-        return self.devhub.query_all(query, **params)
+        return self.devhub.query_all(query)
 
     def query_existing_active_snapshot(self, snapshot_name: str):
         result = self.query(snapshot_name=snapshot_name, status=["Active"])

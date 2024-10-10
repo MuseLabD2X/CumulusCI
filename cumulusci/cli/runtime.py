@@ -3,16 +3,21 @@ import os
 import sys
 from logging import getLogger
 from subprocess import call
-
-import click
-import keyring
 import pkg_resources
+import keyring
+
 
 from cumulusci.cli.utils import get_installed_version
 from cumulusci.core.exceptions import ConfigError, KeychainKeyNotFound, OrgNotFound
 from cumulusci.core.runtime import BaseCumulusCI
-from cumulusci.core.utils import import_global
+from cumulusci.core.utils import import_global, process_bool_arg
 from cumulusci.utils import get_cci_upgrade_command, random_alphanumeric_underscore
+
+USE_RICH_CLICK = process_bool_arg(os.environ.get("CUMULUSCI_USE_RICH_CLICK", True))
+if USE_RICH_CLICK:
+    import rich_click as click
+else:
+    import click
 
 logger = getLogger(__name__)
 

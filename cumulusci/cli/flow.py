@@ -5,7 +5,7 @@ from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
-import click
+from cumulusci.cli.runtime import click
 
 from cumulusci.core.github import set_github_output
 from cumulusci.core.exceptions import FlowNotFoundError

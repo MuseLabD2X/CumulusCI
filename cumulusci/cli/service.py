@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Callable, Dict, Optional
 
-import click
+from cumulusci.cli.runtime import click
 from rich.console import Console
 
 from cumulusci.core.config import ServiceConfig

@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-import click
+from cumulusci.cli.runtime import click
 from rich.console import Console
 from rst2ansi import rst2ansi
 

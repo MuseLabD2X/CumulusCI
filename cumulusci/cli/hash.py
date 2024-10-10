@@ -1,4 +1,4 @@
-import click
+from cumulusci.cli.runtime import click
 import hashlib
 import json
 import os

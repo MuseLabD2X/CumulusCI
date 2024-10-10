@@ -1,4 +1,4 @@
-import click
+from cumulusci.cli.runtime import click
 
 from cumulusci.core.dependencies.dependencies import (
     GitHubDynamicDependency,

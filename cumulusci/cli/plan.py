@@ -1,6 +1,6 @@
 import json
 
-import click
+from cumulusci.cli.runtime import click
 from rich.console import Console
 
 from cumulusci.cli.ui import CliTable

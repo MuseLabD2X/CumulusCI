@@ -1,6 +1,6 @@
 import sys
 
-import click
+from cumulusci.cli.runtime import click
 import pkg_resources
 import sarge
 

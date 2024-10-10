@@ -1,7 +1,7 @@
 from collections import defaultdict
 from typing import Dict
 
-import click
+from cumulusci.cli.runtime import click
 import yaml
 
 from cumulusci.core.exceptions import TaskOptionsError
@@ -229,9 +229,11 @@ class GenerateMapping(BaseSalesforceApiTask):
 
                     # Can we safely namespace-strip this reference?
                     stripped_references = [
-                        strip_namespace(orig_reference)
-                        if strip_namespace(orig_reference) not in stack
-                        else orig_reference
+                        (
+                            strip_namespace(orig_reference)
+                            if strip_namespace(orig_reference) not in stack
+                            else orig_reference
+                        )
                         for orig_reference in referenceTo
                     ]
 
