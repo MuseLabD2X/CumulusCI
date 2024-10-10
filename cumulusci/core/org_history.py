@@ -42,7 +42,6 @@ from cumulusci.utils.version_strings import (
 )
 from cumulusci.utils.yaml.cumulusci_yml import Step, ScratchOrg
 from cumulusci.utils.yaml.model_parser import CCIModel
-from cumulusci.utils.masking import mask_in_json
 
 VersionInfo = namedtuple("VersionInfo", ["id", "number"])
 
