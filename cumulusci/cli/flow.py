@@ -77,8 +77,6 @@ def format_deploys(deploys):
 def report_predictions(flow_name, predictions, org_config):
     console = Console()
 
-
-
     flow_tracker = {
         "deploys": [],
         "package_installs": [],
@@ -87,21 +85,25 @@ def report_predictions(flow_name, predictions, org_config):
     flow_tracker_hash = None
     flow_snapshot_hash = None
 
-    flow_tree = Tree(f"[bold green]Flow Predictions for {flow_name} on org {org_config.name}")
+    flow_tree = Tree(
+        f"[bold green]Flow Predictions for {flow_name} on org {org_config.name}"
+    )
 
     snapshot_hashes = org_config.history.get_snapshot_hash(return_data=True)
     starting_snapshot_hash = hash_obj(snapshot_hashes) if snapshot_hashes else None
-    
+
     for step in predictions:
         hash_content_tree = None
         hash_content = None
         if step.tracker:
             hash_content = step.tracker.get_org_tracker_hash(return_data=True)
-           
-            if hash_content: 
+
+            if hash_content:
                 # Update the flow tracker and hashes
                 flow_tracker["deploys"].extend(hash_content.get("deploys", []))
-                flow_tracker["package_installs"].extend(hash_content.get("package_installs", []))
+                flow_tracker["package_installs"].extend(
+                    hash_content.get("package_installs", [])
+                )
                 flow_tracker["transforms"].extend(hash_content.get("transforms", []))
                 flow_tracker_hash = hash_obj(flow_tracker)
                 flow_snapshot_hash = hash_obj(
@@ -111,23 +113,23 @@ def report_predictions(flow_name, predictions, org_config):
                     }
                 )
             else:
-                step_tree = flow_tree.add(
-                    f"[bold]{step.path}:[/bold]"
-                )
-            
+                step_tree = flow_tree.add(f"[bold]{step.path}:[/bold]")
+
         if step.skip:
-            step_tree = flow_tree.add(f"[bold grey53]{flow_snapshot_hash}{step.path} (skipped)")
+            step_tree = flow_tree.add(
+                f"[bold grey53]{flow_snapshot_hash}{step.path} (skipped)"
+            )
             flow_tree.add(step_tree)
             continue
 
         step_tree = flow_tree.add(
             f"[bold]([green]{flow_snapshot_hash}[/green]) {step.path}:[/bold] {step.task_config.get('name') or step.task_name or step.task_class.__name__}"
         )
-        
+
         # Report the step's deploys
         if step.tracker and step.tracker.deploys.has_deploys:
             deploys_tree = step_tree.add("[bold green]Deploys")
-            
+
             # Deploys from the repo
             if step.tracker.deploys.repo:
                 deploy_repo_subtree = deploys_tree.add(f"[italic]From repo")
@@ -137,7 +139,7 @@ def report_predictions(flow_name, predictions, org_config):
                         f"Size: [bold]{deploy.size}[/bold] bytes\n"
                         f"Hash: [bold]{format_deploy_hash(deploy)}[/bold]\n"
                     )
-                    
+
             # Deploys from external GitHub repos
             if step.tracker.deploys.github:
                 deploy_github_subtree = deploys_tree.add(
@@ -145,22 +147,26 @@ def report_predictions(flow_name, predictions, org_config):
                 )
                 for deploy in step.tracker.deploys.github:
                     subfolder = (
-                        f"Subfolder: [bold][blue]{deploy.subfolder}[/blue][/bold]\n" if deploy.subfolder else ""
+                        f"Subfolder: [bold][blue]{deploy.subfolder}[/blue][/bold]\n"
+                        if deploy.subfolder
+                        else ""
                     )
                     deploy_github_subtree.add(
-                        f"[cyan][bold]{deploy.repo.replace("https://github.com/", "gh:")}[/bold]@{deploy.commit[:7]}[/cyan]\n"
+                        f"[cyan][bold]{deploy.repo.replace('https://github.com/', 'gh:')}[/bold]@{deploy.commit[:7]}[/cyan]\n"
                         f"{subfolder}"
                         f"Hash: [bold]{format_deploy_hash(deploy)}[/bold]\n"
                         f"Size: [bold]{deploy.size}[/bold] bytes\n"
                     )
-                    
+
             # Deploys from external zip URLs
             if step.tracker.deploys.zip_url:
                 deploy_zip_url_subtree = deploys_tree.add(
                     f"[italic]From external zip URL"
                 )
                 subfolder = (
-                    f"Subfolder: [bold][blue]{deploy.subfolder}[/blue][/bold]\n" if deploy.subfolder else ""
+                    f"Subfolder: [bold][blue]{deploy.subfolder}[/blue][/bold]\n"
+                    if deploy.subfolder
+                    else ""
                 )
                 for deploy in step.tracker.deploys.zip_url:
                     deploy_zip_url_subtree.add(
@@ -185,10 +191,12 @@ def report_predictions(flow_name, predictions, org_config):
                 installs_tree.add(
                     f"{package_name}@[bold]{package_install.version or package_install.version_id}[/bold]"
                 )
-                
+
         # Report the step's hashes
         if step.tracker and hash_content:
-            hash_content_tree = step_tree.add("[green][bold]Tracker Hash Contents[/bold][/green]")
+            hash_content_tree = step_tree.add(
+                "[green][bold]Tracker Hash Contents[/bold][/green]"
+            )
             if hash_content["deploys"]:
                 hash_deploys_subtree = hash_content_tree.add(
                     f"[green][bold]Deploys[/bold][/green]",
@@ -214,9 +222,13 @@ def report_predictions(flow_name, predictions, org_config):
             )
             step_tree.add(Panel(step_hashes_content, title="Step Hashes"))
         else:
-            step_tree.add(Panel("No tracker hash content", title="Step Hashes", style="bold grey53"))
-            
-    console.print()    
+            step_tree.add(
+                Panel(
+                    "No tracker hash content", title="Step Hashes", style="bold grey53"
+                )
+            )
+
+    console.print()
     console.print(flow_tree)
 
     org_hashes = (
@@ -227,9 +239,14 @@ def report_predictions(flow_name, predictions, org_config):
     if starting_snapshot_hash:
         f"Pre-Flow Org Tracker:   [bold]{starting_snapshot_hash}[/bold]\n"
         "  [yellow][bold]NOTE:[/bold][italic] The target org's history shows changes made by the flow[/italic][/yellow]\n"
-    console.print(Panel(org_hashes, title=f"Predicted Flow Hashes for {flow_name}", style="bold green"))
+    console.print(
+        Panel(
+            org_hashes,
+            title=f"Predicted Flow Hashes for {flow_name}",
+            style="bold green",
+        )
+    )
     console.print(Text("End of Flow Prediction", style="bold"))
-    
 
 
 @click.group("flow", help="Commands for finding and running flows for a project")
@@ -475,9 +492,15 @@ def flow_run(
             force_use_snapshots=use_snapshots,
         )
         if coordinator.use_snapshots:
-            click.echo("** Using snapshot predictions to find matching snapshots for flow layers")
-            click.echo("   This process will first run the flow in predict mode to calculate hashes")
-            click.echo("   to look for active scratch org snapshots to start the org from.")
+            click.echo(
+                "** Using snapshot predictions to find matching snapshots for flow layers"
+            )
+            click.echo(
+                "   This process will first run the flow in predict mode to calculate hashes"
+            )
+            click.echo(
+                "   to look for active scratch org snapshots to start the org from."
+            )
         if rich:
             # Replace the default handler with the RichHandler
             coordinator.logger.handlers = []
