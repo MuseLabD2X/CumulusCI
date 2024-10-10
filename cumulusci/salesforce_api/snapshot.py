@@ -71,39 +71,42 @@ class SnapshotManager:
     def query(
         self,
         snapshot_id: Optional[str] = None,
-        snapshot_ids: Optional[list] = None,
+        snapshot_ids: Optional[List[str]] = None,
         snapshot_name: Optional[str] = None,
-        snapshot_names: Optional[list] = None,
+        snapshot_names: Optional[List[str]] = None,
         description: Optional[str] = None,
-        status: Optional[list] = None,
+        status: Optional[Union[str, List[str]]] = None,
         limit: Optional[int] = None,
     ):
-        if isinstance(status, str):
-            status = [status]
         query = f"SELECT {', '.join(ORG_SNAPSHOT_FIELDS)} FROM OrgSnapshot"
         where_clauses = []
+        params = {}
+
         if snapshot_id:
-            where_clauses.append(f"Id = '{snapshot_id}'")
+            where_clauses.append("Id = :snapshot_id")
+            params["snapshot_id"] = snapshot_id
+
         if snapshot_ids:
-            snapshot_ids = "'" + "','".join(
-                ["'" + s.replace("'", "'") + "'" for s in snapshot_ids]
-            )
-            where_clauses.append(f"Id IN ({snapshot_ids})")
+            where_clauses.append("Id IN :snapshot_ids")
+            params["snapshot_ids"] = tuple(snapshot_ids)
+
         if snapshot_name:
-            snapshot_name = "'" + "','".join(
-                ["'" + s.replace("'", "'") + "'" for s in snapshot_name]
-            )
-            where_clauses.append(f"SnapshotName = '{snapshot_name}'")
+            where_clauses.append("SnapshotName = :snapshot_name")
+            params["snapshot_name"] = snapshot_name
+
         if snapshot_names:
-            snapshot_names = "'" + "','".join(
-                ["'" + s.replace("'", "'") + "'" for s in snapshot_names]
-            )
-            where_clauses.append(f"SnapshotName IN ({snapshot_names})")
+            where_clauses.append("SnapshotName IN :snapshot_names")
+            params["snapshot_names"] = tuple(snapshot_names)
+
         if description:
-            where_clauses.append(f"Description LIKE '{description}'")
+            where_clauses.append("Description LIKE :description")
+            params["description"] = f"%{description}%"
+
         if status:
-            status = "'" + "','".join(["'" + s.replace("'", "'") + "'" for s in status])
-            where_clauses.append(f"Status IN ({status})")
+            if isinstance(status, str):
+                status = [status]
+            where_clauses.append("Status IN :status")
+            params["status"] = tuple(status)
 
         self.logger.info(f"Querying snapshots with filters: {where_clauses}")
 
@@ -111,9 +114,10 @@ class SnapshotManager:
             query += " WHERE " + " AND ".join(where_clauses)
 
         if limit:
-            query += f" LIMIT {limit}"
+            query += " LIMIT :limit"
+            params["limit"] = limit
 
-        return self.devhub.query_all(query)
+        return self.devhub.query_all(query, **params)
 
     def query_existing_active_snapshot(self, snapshot_name: str):
         result = self.query(snapshot_name=snapshot_name, status=["Active"])
