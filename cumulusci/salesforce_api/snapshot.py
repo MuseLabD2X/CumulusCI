@@ -75,9 +75,10 @@ class SnapshotManager:
         if snapshot_id:
             where_clauses.append(f"Id = '{snapshot_id}'")
         if snapshot_ids:
-            snapshot_ids = ', '.join([f"'{s.replace("'","\'")}'" for s in snapshot_ids])
+            snapshot_ids = "'" + "','".join(["'" + s.replace("'","\'") + "'" for s in snapshot_ids])
             where_clauses.append(f"Id IN ({snapshot_ids})")
         if snapshot_name:
+            snapshot_name = "'" + "','".join(["'" + s.replace("'","\'") + "'" for s in snapshot_name])
             where_clauses.append(f"SnapshotName = '{snapshot_name}'")
         if snapshot_names:
             snapshot_names = ', '.join([f"'{s.replace("'","\'")}'" for s in snapshot_names])
@@ -86,6 +87,7 @@ class SnapshotManager:
             where_clauses.append(f"Description LIKE '{description}'")
         if status:
             status = ', '.join([f"'{s.replace("'","\'")}'" for s in status])
+            status = "'" + "','".join(["'" + s.replace("'","\'") + "'" for s in status])
             where_clauses.append(f"Status IN ({status})")
         
         self.logger.info(f"Querying snapshots with filters: {where_clauses}")
@@ -94,7 +96,7 @@ class SnapshotManager:
             query += " WHERE " + " AND ".join(where_clauses)
         
         if limit:
-            query += f" LIMIT {limit}""
+            query += f" LIMIT {limit}"
         
         return self.devhub.query_all(query)
 
