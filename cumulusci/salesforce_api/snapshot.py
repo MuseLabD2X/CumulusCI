@@ -76,6 +76,8 @@ class SnapshotManager:
         snapshot_name: Optional[str] = None,
         snapshot_names: Optional[List[str]] = None,
         description: Optional[str] = None,
+        description_or: Optional[List[str]] = None,
+        description_and: Optional[List[str]] = None,
         status: Optional[Union[str, List[str]]] = None,
         limit: Optional[int] = None,
     ):
@@ -106,6 +108,25 @@ class SnapshotManager:
             where_clauses.append("Description LIKE {description}")
             params["description"] = f"%{description}%"
 
+        if description_or:
+            where_clauses.append(
+                "("
+                + " OR ".join(
+                    [f"Description LIKE '%{desc}%'" for desc in description_or]
+                )
+                + ")"
+            )
+
+        if description_and:
+            where_clauses.append(
+                "("
+                + " AND ".join(
+                    ["Description LIKE '%{desc}%'" for desc in description_and]
+                )
+                + ")"
+            )
+            params["description_and"] = tuple([f"%{desc}%" for desc in description_and])
+
         if status:
             if isinstance(status, str):
                 status = [status]
@@ -120,6 +141,7 @@ class SnapshotManager:
         if limit:
             query += " LIMIT {limit}"
             params["limit"] = limit
+        self.logger.info(f"Final query: {query}")
         query = format_soql(query, **params)
 
         return self.devhub.query_all(query)

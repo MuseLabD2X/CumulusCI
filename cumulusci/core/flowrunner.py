@@ -736,11 +736,11 @@ class FlowCoordinator:
                 )  # API Version for GA of OrgSnapshots
             snapshots = SnapshotManager(devhub_api, logger=self.logger)
             description_where = [
-                f"%hash:{step['snapshot_hash']}%" for step in snapshot_hashes
+                f" hash:{step['snapshot_hash']}" for step in snapshot_hashes
             ]
             description_where = tuple(description_where)
             res = snapshots.query(
-                description=description_where,
+                description_or=description_where,
                 status="Active",
             )
 
