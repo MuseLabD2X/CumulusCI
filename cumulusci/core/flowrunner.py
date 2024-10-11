@@ -428,6 +428,7 @@ class FlowCoordinator:
         predict_org_config: Optional[OrgConfig] = None,
         use_snapshots: Optional[bool] = None,
         force_use_snapshots: Optional[bool] = None,
+        logger: Optional[logging.Logger] = None,
     ):
         self.project_config = project_config
         self.flow_config = flow_config
@@ -448,7 +449,7 @@ class FlowCoordinator:
         self.skip_remaining = False
         self.results = []
 
-        self.logger = self._init_logger()
+        self.logger = self._init_logger(logger)
         self.steps = self._init_steps()
 
         self.tracker = FlowActionTracker(
@@ -659,6 +660,13 @@ class FlowCoordinator:
 
         try:
             for step in self.steps:
+                if continue_from_path is not None:
+                    if step.path == continue_from_path:
+                        continue_from_path = None
+                    self.logger.info(
+                        f"Skipping step {step.path} due to continue_from_path={continue_from_path}"
+                    )
+                    continue
                 self._run_step(step)
             flow_name = f"'{self.name}' " if self.name else ""
             self.logger.info(
@@ -672,7 +680,10 @@ class FlowCoordinator:
             self.callbacks.post_flow(self)
 
     def predict_snapshot(
-        self, org_config: OrgConfig, predictions: List[StepPrediction]
+        self,
+        org_config: OrgConfig,
+        predictions: List[StepPrediction],
+        devhub_api=None,
     ):
         """Uses a flow's predictions to determine the best snapshot to use for a scratch org"""
         predicted_snapshots = []
@@ -719,14 +730,17 @@ class FlowCoordinator:
             self.logger.info(
                 "Getting access token for the DevHub to check for snapshots..."
             )
-            devhub_api = get_devhub_api(
-                project_config=self.project_config, api_version="61.0"
-            )  # API Version for GA of OrgSnapshots
+            if not devhub_api:
+                devhub_api = get_devhub_api(
+                    project_config=self.project_config, api_version="61.0"
+                )  # API Version for GA of OrgSnapshots
             snapshots = SnapshotManager(devhub_api, logger=self.logger)
+            description_where = [
+                f"%hash:{step['snapshot_hash']}%" for step in snapshot_hashes
+            ]
+            description_where = tuple(description_where)
             res = snapshots.query(
-                snapshot_names=[
-                    f"CCI{step['snapshot_hash']}" for step in snapshot_hashes
-                ],
+                description_where=description_where,
                 status="Active",
             )
 
@@ -923,14 +937,15 @@ class FlowCoordinator:
         if result.exception and not step.allow_failure:
             raise result.exception  # PY3: raise an exception type we control *from* this exception instead?
 
-    def _init_logger(self) -> logging.Logger:
+    def _init_logger(self, logger: logging.Logger = None) -> logging.Logger:
         """
         Returns a logging.Logger-like object to use for the duration of the flow. Tasks will receive this logger
         and getChild(class_name) to get a child logger.
 
         :return: logging.Logger
         """
-        return logging.getLogger("cumulusci.flows").getChild(self.__class__.__name__)
+        logger = logger or logging.getLogger("cumulusci.flows")
+        return logger.getChild(self.__class__.__name__)
 
     def _init_steps(self) -> List[StepSpec]:
         """

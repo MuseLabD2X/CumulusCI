@@ -106,12 +106,16 @@ class BaseCumulusCI:
         skip_from: Optional[str] = None,
         start_from: Optional[str] = None,
         force_use_snapshots: bool = False,
+        logger=None,
     ) -> FlowCoordinator:
         """Get a primed and ready-to-go flow coordinator."""
         if not self.project_config:
             raise ProjectConfigNotFound
         flow_config = self.project_config.get_flow(name)
         callbacks = self.callback_class()
+        flow_args = {}
+        if logger:
+            flow_args["logger"] = logger
         coordinator = FlowCoordinator(
             flow_config.project_config,
             flow_config,
@@ -122,5 +126,6 @@ class BaseCumulusCI:
             start_from=start_from or flow_config.start_from,
             callbacks=callbacks,
             force_use_snapshots=force_use_snapshots,
+            **flow_args,
         )
         return coordinator

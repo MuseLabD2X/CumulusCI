@@ -3,6 +3,7 @@ import os
 import yaml
 from collections import defaultdict
 from datetime import datetime
+from logging import getLogger
 from pathlib import Path
 
 from cumulusci.cli.runtime import click
@@ -20,10 +21,11 @@ from .runtime import pass_runtime
 from .ui import CliTable
 from .utils import group_items
 
+from rich.box import Box
 from rich.console import Console
 from rich.table import Table
 from rich.panel import Panel
-from rich.text import Text
+from rich.text import Span, Text
 from rich.tree import Tree
 from rich.logging import RichHandler
 
@@ -74,8 +76,9 @@ def format_deploys(deploys):
     return formatted_deploys
 
 
-def report_predictions(flow_name, predictions, org_config):
-    console = Console()
+def report_predictions(flow_name, predictions, org_config, return_tree: bool = False):
+    if not return_tree:
+        console = Console()
 
     flow_tracker = {
         "deploys": [],
@@ -117,7 +120,7 @@ def report_predictions(flow_name, predictions, org_config):
 
         if step.skip:
             step_tree = flow_tree.add(
-                f"[bold grey53]{flow_snapshot_hash}{step.path} (skipped)"
+                f"([bold grey53]{flow_snapshot_hash}) {step.path} (skipped)"
             )
             flow_tree.add(step_tree)
             continue
@@ -227,6 +230,9 @@ def report_predictions(flow_name, predictions, org_config):
                     "No tracker hash content", title="Step Hashes", style="bold grey53"
                 )
             )
+
+    if return_tree:
+        return flow_tree
 
     console.print()
     console.print(flow_tree)
@@ -463,6 +469,8 @@ def flow_run(
     if skip:
         skip = skip.split(",")
 
+    console = Console()
+
     # Get necessary configs
     org, org_config = runtime.get_org(org, check_expired=use_snapshots or predict)
     if delete_org and not org_config.scratch:
@@ -480,18 +488,54 @@ def flow_run(
                     "-o option for flows should contain __ to split task name from option name."
                 )
 
+    if use_snapshots:
+        intro = [
+            "The flow will first be run in predict mode to predict hashes of all steps that make changes to the org.\n",
+            "[bold]Then:[/bold]\n",
+            "  - Query the default DevHub for active snapshots with matching hashes",
+            "  - [green][b]If a snapshot is found[/b][/green], start the org from that snapshot",
+            "    - Start the flow from after the steps matching the snapshot's hash",
+            "  - [bold]If no snapshot is found[/bold], run the flow from the beginning\n",
+        ]
+        console.print(
+            Panel(
+                "\n".join(intro),
+                title="Flow Run with Snapshots",
+                border_style="magenta bold",
+            )
+        )
+
     # Create the flow and handle initialization exceptions
     coordinator = None
     try:
+        get_flow_args = {}
+        if use_snapshots:
+            logger = getLogger("cumulusci.flow")
+            logger.handlers.clear()
+            logger.addHandler(
+                RichHandler(
+                    console=console,
+                    show_level=False,
+                    show_path=False,
+                )
+            )
+            get_flow_args["logger"] = logger
         coordinator = runtime.get_flow(
             flow_name,
             options=options,
             skip=skip,
             skip_from=skip_from,
             start_from=start_from,
-            force_use_snapshots=use_snapshots,
+            **get_flow_args,
         )
-        if coordinator.use_snapshots:
+        if use_snapshots:
+            console.print(
+                Panel(
+                    f"Running flow {flow_name} in predict-only mode without an org",
+                    title="Predicting Flow Hashes",
+                    border_style="bold magenta",
+                )
+            )
             click.echo(
                 "** Using snapshot predictions to find matching snapshots for flow layers"
             )
@@ -501,18 +545,75 @@ def flow_run(
             click.echo(
                 "   to look for active scratch org snapshots to start the org from."
             )
-        if rich:
-            # Replace the default handler with the RichHandler
-            coordinator.logger.handlers = []
-            coordinator.logger.addHandler(RichHandler())
+
+        continue_from_path = None
         start_time = datetime.now()
         action = "Ran"
-        if predict:
+        if predict or use_snapshots:
             predictions = coordinator.predict(org_config)
-            report_predictions(flow_name, predictions, org_config)
+            if not use_snapshots:
+                report_predictions(flow_name, predictions, org_config)
+            else:
+                predictions_tree = report_predictions(
+                    flow_name, predictions, org_config, return_tree=True
+                )
+                console.print(
+                    Panel(
+                        predictions_tree,
+                        title="Flow Predictions",
+                        border_style="bold magenta",
+                    )
+                )
             action = "Predicted"
-        else:
-            coordinator.run(org_config)
+        if use_snapshots:
+            console.print(
+                Panel(
+                    "Accessing the default DevHub to look for active snapshots matching predicted hashes",
+                    title="Looking for Active Snapshots",
+                    border_style="bold magenta",
+                )
+            )
+            org_config = coordinator.predict_snapshot(org_config, predictions)
+            if not org_config.use_snapshot_hashes:
+                console.print(
+                    Panel(
+                        f"No active snapshots found. Running the flow from the beginning is a normal {org} scratch org.",
+                        title="No Snapshots Found",
+                        border_style="bold magenta",
+                    )
+                )
+            else:
+                matches = [
+                    "Found the following matching snapshots in step order:\n",
+                ]
+                for snapshot in org_config.snapshot_hashes:
+                    matches.append(
+                        f"- [b]{snapshot['path']} ([green]{snapshot['snapshot_hash']}[/green])[/b]"
+                    )
+                    matches.append(
+                        f"  SnapshotName: [green][b]{snapshot['snapshot']['SnapshotName']}[/b][/green]",
+                    )
+                    matches.append(f"  Created: {snapshot['snapshot']['CreatedDate']}")
+                    matches.append(
+                        f"  Description: {snapshot['snapshot']['Description']}\n"
+                    )
+
+                continue_from_path = snapshot["path"]
+                matches.append("")
+                matches.append(
+                    f"[green][b]Starting from {snapshot['path']}...[/b][/green]"
+                )
+                console.print(
+                    Panel(
+                        "\n".join(matches),
+                        title="Found Snapshots",
+                        border_style="bold magenta",
+                    )
+                )
+
+        if not predict:
+            action = "Ran"
+            coordinator.run(org_config, continue_from_path=continue_from_path)
         duration = datetime.now() - start_time
         click.echo(f"{action} {flow_name} in {format_duration(duration)}")
         if not predict:

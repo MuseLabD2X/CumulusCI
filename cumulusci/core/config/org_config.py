@@ -97,14 +97,15 @@ class OrgConfig(BaseConfig):
             if config.get("org_id"):
                 config_history["org_id"] = config["org_id"]
 
-            self.history = OrgHistory.parse_obj(config_history)
         except Exception as e:
             history_exception = e
 
+        self.history = OrgHistory.parse_obj(config_history)
         super().__init__(config)
 
         if history_exception:
             if config.get("track_history", False):
+                raise history_exception from history_exception
                 self.logger.error(
                     f"Failed to load history for org {name}: {history_exception}. Disabiling track_history to avoid data loss."
                 )

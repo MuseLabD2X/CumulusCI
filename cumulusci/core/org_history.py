@@ -1436,6 +1436,8 @@ class OrgHistory(BaseOrgHistory):
 def actions_from_dicts(actions: list[dict]) -> List[OrgActionType]:
     mapped = []
     for action_data in actions:
+        if action_data is None:
+            continue
         try:
             action: OrgActionType | None = None
             if "action_type" not in action_data:
