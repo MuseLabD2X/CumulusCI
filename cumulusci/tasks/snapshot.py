@@ -709,6 +709,10 @@ class CreateHashedSnapshot(BaseCreateOrgSnapshot):
 
 
 class GithubPullRequestSnapshotOptions(CCIOptions):
+    check_only: bool = Field(
+        default=False,
+        description="Whether to only check the conditions for creating a snapshot without creating one. Defaults to False.",
+    )
     build_success: bool = Field(
         ...,
         description="Set to True if the build was successful or False for a failure. Defaults to True.",
@@ -799,6 +803,10 @@ class GithubPullRequestSnapshot(BaseGithubTask, BaseCreateOrgSnapshot):
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
+        self.parsed_options.check_only = process_bool_arg(
+            self.parsed_options.check_only
+        )
+
         self.parsed_options.build_success = process_bool_arg(
             self.parsed_options.build_success
         )
@@ -828,6 +836,26 @@ class GithubPullRequestSnapshot(BaseGithubTask, BaseCreateOrgSnapshot):
         super()._init_task()
         self.repo = self.get_repo()
         self.pull_request = self._lookup_pull_request()
+
+    def _run_task(self):
+        if self.parsed_options.check_only:
+            should_create = self._should_create_snapshot()
+            if should_create is not None:
+                self.console.print(
+                    Panel(
+                        f"Conditions not met: {should_create}",
+                        title="Snapshot Creation Check",
+                        border_style="yellow",
+                    )
+                )
+                return False
+            else:
+                Panel(
+                    "Conditions met for snapshot creation.",
+                    title="Snapshot Creation Check",
+                    border_style="green",
+                )
+                return True
 
     def _lookup_pull_request(self):
         pr = super()._lookup_pull_request()

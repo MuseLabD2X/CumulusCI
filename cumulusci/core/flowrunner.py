@@ -740,7 +740,7 @@ class FlowCoordinator:
             ]
             description_where = tuple(description_where)
             res = snapshots.query(
-                description_where=description_where,
+                description=description_where,
                 status="Active",
             )
 
