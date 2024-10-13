@@ -232,7 +232,7 @@ class NameContextOptions(CCIOptions):
     )
 
 
-class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceApiTask):
+class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTask):
     """Base class for tasks that create Scratch Org Snapshots."""
 
     # Peg to API Version 60.0 for OrgSnapshot object
@@ -285,6 +285,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseSalesforceApiTask):
         )
         self.start_time = self._format_datetime(self._get_current_time())
         self.snapshots = self._init_snapshots()
+        self.repo = self.get_repo()
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
@@ -779,7 +780,7 @@ class GithubPullRequestSnapshotOptions(CCIOptions):
     )
 
 
-class GithubPullRequestSnapshot(BaseGithubTask, BaseCreateOrgSnapshot):
+class GithubPullRequestSnapshot(BaseCreateOrgSnapshot):
     task_docs = """
     Creates a Scratch Org Snapshot for a GitHub Pull Request based on build status and conditions.
     
@@ -834,7 +835,6 @@ class GithubPullRequestSnapshot(BaseGithubTask, BaseCreateOrgSnapshot):
 
     def _init_task(self):
         super()._init_task()
-        self.repo = self.get_repo()
         self.pull_request = self._lookup_pull_request()
 
     def _run_task(self):
