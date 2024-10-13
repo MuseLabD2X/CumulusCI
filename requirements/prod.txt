@@ -23,6 +23,7 @@ charset-normalizer==3.3.2
 click==8.1.7
     # via
     #   cumulusci (pyproject.toml)
+    #   rich-click
     #   snowfakery
 cryptography==43.0.1
     # via
@@ -117,7 +118,11 @@ requests==2.29.0
     #   snowfakery
 requests-futures==1.0.1
     # via cumulusci (pyproject.toml)
-rich==13.8.1
+rich==13.9.2
+    # via
+    #   cumulusci (pyproject.toml)
+    #   rich-click
+rich-click==1.8.3
     # via cumulusci (pyproject.toml)
 robotframework==7.1
     # via
@@ -164,7 +169,9 @@ sqlalchemy==1.4.52
     #   snowfakery
 typing-extensions==4.10.0
     # via
+    #   faker
     #   pydantic
+    #   rich-click
     #   snowfakery
 unicodecsv==0.14.1
     # via salesforce-bulk
@@ -175,7 +182,7 @@ urllib3==1.26.18
     #   requests
     #   selenium
     #   snowfakery
-xmltodict==0.13.0
+xmltodict==0.14.1
     # via cumulusci (pyproject.toml)
 zipp==3.20.2
     # via importlib-metadata

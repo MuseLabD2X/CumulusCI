@@ -56,7 +56,7 @@ def history():
 @click.option("--indent", type=int, help="Indentation level for JSON output.")
 @pass_runtime(require_project=True, require_keychain=True)
 def history_orgs(runtime, org_name, print_json, indent):
-    org_name, org_config = runtime.get_org(org_name)
+    org_name, org_config = runtime.get_org(org_name, check_expired=False)
     previous_orgs = org_config.history.previous_orgs
     if print_json:
         click.echo(
@@ -202,14 +202,14 @@ def history_list(
     print_json=False,
     indent=4,
 ):
-    org_name, org_config = runtime.get_org(org_name)
+    org_name, org_config = runtime.get_org(org_name, check_expired=False)
 
     org_history = org_config.history
 
     if org_config.track_history is False:
         click.echo("Org history tracking is disabled for this org.")
         click.echo(
-            "*Use `cci org history enable` to enable history tracking for this org.*"
+            "*Use `cci history enable` to enable history tracking for this org.*"
         )
         if org_history and (org_history.actions or org_history.previous_orgs):
             click.echo(
@@ -297,7 +297,7 @@ def history_list(
 )
 @pass_runtime(require_project=True, require_keychain=True)
 def history_info(runtime, org_name, action_hash, data, print_json, indent, org_id):
-    org_name, org_config = runtime.get_org(org_name)
+    org_name, org_config = runtime.get_org(org_name, check_expired=False)
 
     org_history = org_config.history
     if org_id:
@@ -380,7 +380,7 @@ def history_dependencies(
     print_json=False,
     indent=4,
 ):
-    org_name, org_config = runtime.get_org(org_name)
+    org_name, org_config = runtime.get_org(org_name, check_expired=False)
 
     org_history = org_config.history
     if org_id:
@@ -549,7 +549,7 @@ def history_replay(
 )
 @pass_runtime(require_project=False, require_keychain=True)
 def history_clear(runtime, org_name, clear_all, before, after, action_hash, org_id):
-    org_name, org_config = runtime.get_org(org_name)
+    org_name, org_config = runtime.get_org(org_name, check_expired=False)
     console = Console()
     console.print()
     filters = FilterOrgActions()
@@ -610,10 +610,10 @@ def history_clear(runtime, org_name, clear_all, before, after, action_hash, org_
 
 @history.command(name="enable", help="Enable history tracking for the org")
 @orgname_option_or_argument(required=False)
-@pass_runtime(require_project=False, require_keychain=True)
+@pass_runtime(require_project=True, require_keychain=True)
 def history_enable(runtime, org_name):
 
-    org_name, org_config = runtime.get_org(org_name)
+    org_name, org_config = runtime.get_org(org_name, check_expired=False)
     if org_config.track_history:
         click.echo("Org history tracking is already enabled for this org.")
         return
@@ -624,9 +624,9 @@ def history_enable(runtime, org_name):
 
 @history.command(name="disable", help="Disable history tracking for the org")
 @orgname_option_or_argument(required=False)
-@pass_runtime(require_project=False, require_keychain=True)
+@pass_runtime(require_project=True, require_keychain=True)
 def history_disable(runtime, org_name):
-    org_name, org_config = runtime.get_org(org_name)
+    org_name, org_config = runtime.get_org(org_name, check_expired=False)
     if not org_config.track_history:
         click.echo("Org history tracking is already disabled for this org.")
         return
