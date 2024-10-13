@@ -1220,7 +1220,6 @@ class BaseOrgHistory(BaseAction):
         if isinstance(filters, dict):
             filters = FilterOrgActions.parse_obj(filters)
         filters.action_type = ["Task", "Flow"]
-        filters.status = "success"
 
         for action in self.filtered_actions(filters):
             action_data = action.get_org_tracker_hash(return_data=True)
