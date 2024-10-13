@@ -1209,6 +1209,7 @@ class FlowCoordinator:
         data["status"] = status
         data["steps"] = [result.action for result in self.results if result.action]
         self.action = FlowOrgAction.parse_obj(data)
+        print(f"Flow action: {self.action}")
 
 
 class PreflightFlowCoordinator(FlowCoordinator):

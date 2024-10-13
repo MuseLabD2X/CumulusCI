@@ -92,6 +92,7 @@ class OrgConfig(BaseConfig):
         self._is_person_accounts_enabled = None
         self._multiple_currencies_is_enabled = False
         history_exception = None
+        config.setdefault("track_history", True)
         try:
             config_history = config.get("history", {})
             if config.get("org_id"):
@@ -622,6 +623,7 @@ class OrgConfig(BaseConfig):
     def add_action_to_history(self, action):
         """Add an entry to the org's history"""
         if not self.track_history:
+            self.logger.info("History tracking is disabled, skipping history entry")
             return
 
         self.history.actions.append(action)

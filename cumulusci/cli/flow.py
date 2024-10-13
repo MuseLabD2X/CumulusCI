@@ -617,6 +617,13 @@ def flow_run(
         duration = datetime.now() - start_time
         click.echo(f"{action} {flow_name} in {format_duration(duration)}")
         if not predict:
+            console.print(
+                Panel(
+                    f"Flow {flow_name} completed successfully in {format_duration(duration)}\nResult: {coordinator.action}",
+                    title="Flow Complete",
+                    border_style="bold green",
+                )
+            )
             org_config.add_action_to_history(coordinator.action)
     except Exception as e:
         if coordinator and coordinator.action:
