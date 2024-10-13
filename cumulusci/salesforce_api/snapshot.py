@@ -270,7 +270,7 @@ class SnapshotUX:
 
         if self.is_ci_environment:
             self.console.print(
-                log_entry, markup=True
+                log_text, markup=True
             )  # Print for CI environments with markup
 
     def update_snapshot_info(self, snapshot):
