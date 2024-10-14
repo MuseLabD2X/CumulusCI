@@ -286,6 +286,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
         self.start_time = self._format_datetime(self._get_current_time())
         self.snapshots = self._init_snapshots()
         self.repo = self.get_repo()
+        super()._init_task()
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
@@ -530,7 +531,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
     def _create_github_environment(self, snapshot_name):
         try:
             environment_name = (
-                f"{self.parsed_options['github_environment_prefix']}{snapshot_name}"
+                f"{self.parsed_options.github_environment_prefix}{snapshot_name}"
             )
 
             # Check if environment already exists

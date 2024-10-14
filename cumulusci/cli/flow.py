@@ -619,7 +619,7 @@ def flow_run(
         if not predict:
             console.print(
                 Panel(
-                    f"Flow {flow_name} completed successfully in {format_duration(duration)}\nResult: {coordinator.action}",
+                    f"Flow {flow_name} completed successfully in {format_duration(duration)}",
                     title="Flow Complete",
                     border_style="bold green",
                 )
