@@ -215,7 +215,7 @@ class RunTaskCommand(click.MultiCommand):
                     pdb.set_trace()
 
             finally:
-                if task_instance and task_instance.action:
+                if org_config and task_instance and task_instance.action:
                     org_config.add_action_to_history(task_instance.action)
 
                 runtime.alert(f"Task complete: {task_name}")

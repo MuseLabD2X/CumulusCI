@@ -295,6 +295,9 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
             self.parsed_options.snapshot_id = self.parsed_options.snapshot_id
             self.parsed_options.source_org_id = self.parsed_options.source_org_id
         if isinstance(self.Options, DescriptionDataOptions):
+            flows = self.flow.name if self.flow else None
+            if hasattr(self.parsed_options, "flows"):
+                flows = self.parsed_options.flows
             flows = self.parsed_options.flows or self.flow.name if self.flow else None
             if not flows and self.org_config.track_history:
                 flows = [
