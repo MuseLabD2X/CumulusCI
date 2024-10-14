@@ -9,6 +9,8 @@ import keyring
 
 from cumulusci.cli.utils import get_installed_version
 from cumulusci.core.exceptions import ConfigError, KeychainKeyNotFound, OrgNotFound
+from cumulusci.core.flowrunner_github import GitHubSummaryCallback
+from cumulusci.core.flowrunner import FlowCallback
 from cumulusci.core.runtime import BaseCumulusCI
 from cumulusci.core.utils import import_global, process_bool_arg
 from cumulusci.utils import get_cci_upgrade_command, random_alphanumeric_underscore
@@ -21,8 +23,10 @@ else:
 
 logger = getLogger(__name__)
 
+IS_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
 class CliRuntime(BaseCumulusCI):
+    clallback_class = FlowCallback if not IS_GITHUB_ACTIONS else GitHubSummaryCallback
     def __init__(self, *args, **kwargs):
         try:
             super(CliRuntime, self).__init__(*args, **kwargs)

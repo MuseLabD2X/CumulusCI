@@ -275,6 +275,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
         self.start_time = None
 
     def _init_task(self):
+        super()._init_task()
         self.devhub = self._get_devhub_api()
         self.console = Console()
         self.is_github_job = os.getenv("GITHUB_ACTIONS") == "true"
@@ -286,7 +287,6 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
         self.start_time = self._format_datetime(self._get_current_time())
         self.snapshots = self._init_snapshots()
         self.repo = self.get_repo()
-        super()._init_task()
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
