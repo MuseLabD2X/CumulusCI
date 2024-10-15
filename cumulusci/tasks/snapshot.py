@@ -442,7 +442,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
 
     def _generate_snapshot_name(self, name: Optional[str] = None):
         # Try snapshot_name option
-        if not name:
+        if not name and hasattr(self.parsed_options, "snapshot_name"):
             name = self.parsed_options.snapshot_name
         # Try branch
         if not name:
