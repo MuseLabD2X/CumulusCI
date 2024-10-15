@@ -157,14 +157,21 @@ class SnapshotManager:
             self.logger.info(f"No active snapshot found with name {snapshot_name}")
 
     def query_and_delete_in_progress_snapshot(self, snapshot_name: str):
-        result = self.query(snapshot_name=snapshot_name, status=["In Progress"])
+        result = self.query(snapshot_name=snapshot_name, status=["In Progress","Active"])
         if result["totalSize"] > 0:
             snapshot_id = result["records"][0]["Id"]
-            self.logger.info(
-                f"Found in-progress snapshot {snapshot_id}, deleting it..."
-            )
-            self.devhub.OrgSnapshot.delete(snapshot_id)
-            self.logger.info(f"Deleted in-progress snapshot: {snapshot_id}")
+            status = result["records"][0]["Status"]
+            if status == "In Progress":
+                self.logger.info(
+                    f"Found in-progress snapshot {snapshot_id}, deleting it..."
+                )
+                self.devhub.OrgSnapshot.delete(snapshot_id)
+                self.logger.info(f"Deleted in-progress snapshot: {snapshot_id}")
+            elif status == "Active":
+                self.logger.info(
+                    f"Found active snapshot {snapshot_id} with name {snapshot_name}. Deleting it since it's using a temp name and appears to have failed finalization..."
+                )
+                self.devhub.OrgSnapshot.delete(snapshot_id)
         else:
             self.logger.info(f"No in-progress snapshot found with name {snapshot_name}")
 
