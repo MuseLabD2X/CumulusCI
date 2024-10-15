@@ -531,19 +531,15 @@ def flow_run(
         if use_snapshots:
             console.print(
                 Panel(
-                    f"Running flow {flow_name} in predict-only mode without an org",
+                    (
+                        f"Running flow {flow_name} in predict-only mode without an org\n\n"
+                        "Using snapshot predictions to find matching snapshots for flow layers.\n"
+                        "The flow will first be run in predict mode to calculate hashes, the query\n"
+                        "the DevHub to look for active scratch org snapshots to start the org from."
+                    )
                     title="Predicting Flow Hashes",
                     border_style="bold magenta",
                 )
-            )
-            click.echo(
-                "** Using snapshot predictions to find matching snapshots for flow layers"
-            )
-            click.echo(
-                "   This process will first run the flow in predict mode to calculate hashes"
-            )
-            click.echo(
-                "   to look for active scratch org snapshots to start the org from."
             )
 
         continue_from_path = None

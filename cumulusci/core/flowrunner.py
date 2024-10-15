@@ -114,6 +114,7 @@ class StepSpec:
         "task_class",
         "project_config",
         "allow_failure",
+        "from_snapshot",
         "path",
         "skip",
         "skip_steps",
@@ -130,6 +131,7 @@ class StepSpec:
     ]  # None means this step was skipped by setting task: None
     project_config: BaseProjectConfig
     allow_failure: bool
+    from_snapshot: bool
     path: str
     skip: bool
     skip_steps: List[str]
@@ -145,6 +147,7 @@ class StepSpec:
         task_class: Optional[Type["BaseTask"]],
         project_config: BaseProjectConfig,
         allow_failure: bool = False,
+        from_snapshot: bool = False,
         from_flow: Optional[str] = None,
         skip: bool = False,
         skip_from: Optional[str] = None,
