@@ -294,8 +294,8 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
             self.parsed_options.wait = process_bool_arg(self.parsed_options.wait)
             self.parsed_options.snapshot_id = self.parsed_options.snapshot_id
             self.parsed_options.source_org_id = self.parsed_options.source_org_id
+        flows = self.flow.name if self.flow else None
         if isinstance(self.Options, DescriptionDataOptions):
-            flows = self.flow.name if self.flow else None
             if hasattr(self.parsed_options, "flows"):
                 flows = self.parsed_options.flows
             if not flows and self.org_config.track_history:
@@ -307,7 +307,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
                 ]
 
             self.parsed_options.flows = process_list_arg(
-                self.parsed_options.flows or self.flow.name if self.flow else None
+                flows
             )
             self.parsed_options.pull_request = self._lookup_pull_request()
         if isinstance(self.Options, GithubCommitStatusOptions):
@@ -330,8 +330,8 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
             ),
             "branch": self.project_config.repo_branch,
             "flows": (
-                ",".join(self.parsed_options.flows)
-                if self.parsed_options.flows
+                ",".join(flows)
+                if flows
                 else None
             ),
         }
