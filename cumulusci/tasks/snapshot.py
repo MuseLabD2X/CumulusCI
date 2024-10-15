@@ -147,7 +147,7 @@ class HashOptions(CCIOptions):
 
 class DescriptionDataOptions(CCIOptions):
     flows: Optional[List[HashedFlow]] = Field(
-        None,
+        default=None,
         description=(
             "A dictionary of flow names and their corresponding hash values. "
             "If not provided, values will be looked up from the org's history. "
@@ -298,7 +298,6 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
             flows = self.flow.name if self.flow else None
             if hasattr(self.parsed_options, "flows"):
                 flows = self.parsed_options.flows
-            flows = self.parsed_options.flows or self.flow.name if self.flow else None
             if not flows and self.org_config.track_history:
                 flows = [
                     flow.name
