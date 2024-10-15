@@ -425,7 +425,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
                 ),
                 state="success" if active else "error",
             )
-        if self.is_github_job and self.parsed_options.github_environment_prefix:
+        if self.is_github_job and self.parsed_options.environment_prefix:
             self._create_github_environment(snapshot_name)
 
     def _should_create_snapshot(self):
@@ -534,7 +534,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
     def _create_github_environment(self, snapshot_name):
         try:
             environment_name = (
-                f"{self.parsed_options.github_environment_prefix}{snapshot_name}"
+                f"{self.parsed_options.environment_prefix}{snapshot_name}"
             )
 
             # Check if environment already exists
