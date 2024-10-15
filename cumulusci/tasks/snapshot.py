@@ -932,7 +932,6 @@ class GithubPullRequestSnapshot(BaseCreateOrgSnapshot):
         pr_number = self.pull_request.number if self.pull_request else None
         name = ""
         if not name:
-        from_snapshot: bool = False,
             name = f"Pr{pr_number}" if pr_number else name
 
         if self.parsed_options.build_success is False:
