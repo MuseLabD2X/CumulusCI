@@ -536,7 +536,7 @@ def flow_run(
                         "Using snapshot predictions to find matching snapshots for flow layers.\n"
                         "The flow will first be run in predict mode to calculate hashes, the query\n"
                         "the DevHub to look for active scratch org snapshots to start the org from."
-                    )
+                    ),
                     title="Predicting Flow Hashes",
                     border_style="bold magenta",
                 )
