@@ -21,6 +21,7 @@ RETRY_PACKAGE_ERRORS = [
     "The requested package doesn't yet exist or has been deleted",
     "unable to obtain exclusive access to this record",
     "invalid cross reference id",
+    "Your requested install failed. Please try this again"
 ]
 
 
