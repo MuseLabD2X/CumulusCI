@@ -691,7 +691,7 @@ class BaseSalesforceTask(BaseTask):
         raise NotImplementedError("Subclasses should provide their own implementation")
 
     def _update_credentials(self):
-        if not self.predict:
+        if not self.predict and self.salesforce_task:
             with self.org_config.save_if_changed():
                 self.org_config.refresh_oauth_token(self.project_config.keychain)
 

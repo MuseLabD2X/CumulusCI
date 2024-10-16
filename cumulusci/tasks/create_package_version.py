@@ -153,6 +153,8 @@ class CreatePackageVersion(BaseSalesforceApiTask):
     }
     api_version = "52.0"
 
+    salesforce_task = False
+
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
 
@@ -203,6 +205,7 @@ class CreatePackageVersion(BaseSalesforceApiTask):
             api_version=self.api_version,
             base_url="tooling",
         )
+        
         self.context = TaskContext(self.org_config, self.project_config, self.logger)
 
     def _run_task(self):
@@ -574,6 +577,10 @@ class CreatePackageVersion(BaseSalesforceApiTask):
         # we need to convert those to 04t package version ids,
         # for which we need an org with the packages installed.
         if self._has_1gp_namespace_dependency(dependencies):
+            if not self.salesforce_task:
+                raise NotImplementedError(
+                    "This task does not support 1gp namespace/version resolution. Please use CreatePackageVersionWithNamespaceVersionResolution for that special behavior that requires a scratch org."
+                )
             dependencies = self.org_config.resolve_04t_dependencies(dependencies)
 
         # Convert dependencies to correct format for Package2VersionCreateRequest
@@ -771,3 +778,7 @@ class CreatePackageVersion(BaseSalesforceApiTask):
             ]
 
         return []
+
+class CreatePackageVersionWithNamespaceVersionResolution(CreatePackageVersion):
+    """ Special task class that requires a scratch org to install 1gp managed packages via namespace/version and resolve them to 2gp package versions """
+    salesforce_task = True

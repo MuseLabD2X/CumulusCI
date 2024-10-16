@@ -77,10 +77,8 @@ class PackageXmlGenerator(object):
                 self.parse_types()
 
             xml = self.render_xml()
-            self._record_result(xml)
             return xml
         except Exception as e:
-            self._record_result(e)
             raise e from e
 
     def parse_types(self):

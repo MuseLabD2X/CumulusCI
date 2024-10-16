@@ -116,6 +116,7 @@ class StepSpec:
         "allow_failure",
         "from_snapshot",
         "path",
+        "requires_org",
         "skip",
         "skip_steps",
         "skip_from",
@@ -133,6 +134,7 @@ class StepSpec:
     allow_failure: bool
     from_snapshot: bool
     path: str
+    requires_org: bool
     skip: bool
     skip_steps: List[str]
     skip_from: str
@@ -168,6 +170,9 @@ class StepSpec:
         self.skip_steps = skip_steps or []
         self.start_from = start_from
         self.when = when
+        self.requires_org = task_class.salesforce_task if hasattr(task_class, "salesforce_task") else False
+        if when and "org_config" in when:
+            self.requires_org = True
 
         # Store the dotted path to this step.
         # This is not guaranteed to be unique, because multiple steps
@@ -417,6 +422,7 @@ class FlowCoordinator:
     predict_org_config: Optional[OrgConfig] | None
     use_snapshots: bool = False
     force_use_snapshots: bool = False
+    requires_org: bool = False
 
     def __init__(
         self,
@@ -454,6 +460,7 @@ class FlowCoordinator:
 
         self.logger = self._init_logger(logger)
         self.steps = self._init_steps()
+        self.requires_org = any(step.requires_org for step in self.steps)
 
         self.tracker = FlowActionTracker(
             name=self.name,
@@ -641,12 +648,13 @@ class FlowCoordinator:
 
         self._init_org()
 
-        self._rule(fill="-")
-        self.logger.info("Organization:")
-        self.logger.info(f"  Username: {org_config.username}")
-        self.logger.info(f"    Org Id: {org_config.org_id}")
-        self.logger.info(f"  Instance: {org_config.instance_name}")
-        self._rule(fill="-", new_line=True)
+        if self.requires_org:
+            self._rule(fill="-")
+            self.logger.info("Organization:")
+            self.logger.info(f"  Username: {org_config.username}")
+            self.logger.info(f"    Org Id: {org_config.org_id}")
+            self.logger.info(f"  Instance: {org_config.instance_name}")
+            self._rule(fill="-", new_line=True)
 
         # Give pre_flow callback a chance to alter the steps
         # based on the state of the org before we display the steps.
@@ -1177,11 +1185,17 @@ class FlowCoordinator:
                 f"Skipping org credentials verification and refresh for prediction."
             )
             return
+        if not self.requires_org:
+            self.logger.info(
+                f"Skipping org credentials verification and refresh for flow that does not require an org."
+            )
+            return
         with self.org_config.save_if_changed():
             self.logger.info(
                 f"Verifying and refreshing credentials for the specified org: {self.org_config.name}."
             )
             self.org_config.refresh_oauth_token(self.project_config.keychain)
+
 
     def resolve_return_value_options(self, options):
         """Handle dynamic option value lookups in the format ^^task_name.attr"""
