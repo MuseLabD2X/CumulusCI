@@ -1,6 +1,7 @@
 import os
 import re
 import traceback
+import weakref
 from collections import defaultdict, namedtuple
 from contextlib import contextmanager
 from datetime import date, datetime
@@ -102,11 +103,11 @@ class OrgConfig(BaseConfig):
             history_exception = e
 
         self.history = OrgHistory.parse_obj(config_history)
+        self.history.org = self
         super().__init__(config)
 
         if history_exception:
             if config.get("track_history", False):
-                raise history_exception from history_exception
                 self.logger.error(
                     f"Failed to load history for org {name}: {history_exception}. Disabiling track_history to avoid data loss."
                 )

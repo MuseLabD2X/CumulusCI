@@ -666,10 +666,14 @@ def create_gist(github, description, files):
 
 
 # Utils for GitHub Actions worker environments
-def set_github_output(name: str, value: str):
+def set_github_output(name: str, value: str, logger=None):
     """Set an output parameter for the GitHub Actions runner."""
     github_output = os.environ.get("GITHUB_OUTPUT")
     if not github_output:
+        if logger:
+            logger.info("GITHUB_OUTPUT environment variable not set. Skipping.")
         return
+    if logger:
+        logger.info(f"Setting output parameter {name}={value}")
     with open(github_output, "a") as f:
         f.write(f"{name}={value}\n")

@@ -154,12 +154,14 @@ class ActionScratchDefReference(ActionFileReference):
 
         return values
 
-    def get_snapshot_shape_hash(self):
+    def get_snapshot_shape_hash(self, return_data: bool = False):
         hash_content = {
             "edition": self.scratchdef.get("edition"),
             "features": self.scratchdef.get("features"),
             "shape": self.scratchdef.get("shape"),
         }
+        if return_data:
+            return hash_content
         return hash_obj(hash_content)
 
     def to_snapshot_scratchdef(self, snapshot: str, description: str):
@@ -673,8 +675,8 @@ class OrgCreateAction(BaseOrgActionResult, SFCLIOrgActionMixin):
         description="The instance of the org",
     )
 
-    def get_snapshot_shape_hash(self):
-        return self.config.get_snapshot_shape_hash()
+    def get_snapshot_shape_hash(self, return_data: bool = False):
+        return self.config.get_snapshot_shape_hash(return_data=return_data)
 
     def get_config_hash_data(self):
         data = super().get_config_hash_data()
@@ -1237,6 +1239,7 @@ class BaseOrgHistory(BaseAction):
         self,
         filters: FilterOrgActions | None = None,
         return_data: bool = False,
+        scratchdef_path: str = None,
     ) -> str | Dict[str, Dict[str, List[str] | str]] | None:
         """Calculate a hash of the org's shape and all tracked operations that impacted the org"""
         tracker_hash_content = self.get_org_tracker_hash(filters, return_data=True)
@@ -1249,11 +1252,15 @@ class BaseOrgHistory(BaseAction):
         filters.status = "success"
 
         org_shape = None
-        create_action = self.filtered_actions(
-            FilterOrgActions(action_type="OrgCreate", status="success")
-        )
-        if create_action:
-            org_shape = create_action[0].get_snapshot_shape_hash()
+        if scratchdef_path:
+            scratchdef = ActionScratchDefReference(path=scratchdef_path)
+            org_shape = scratchdef.get_snapshot_shape_hash()
+        else:
+            create_action = self.filtered_actions(
+                FilterOrgActions(action_type="OrgCreate", status="success")
+            )
+            if create_action:
+                org_shape = create_action[0].get_snapshot_shape_hash()
 
         if not org_shape and not tracker_hash_content:
             return None
@@ -1333,6 +1340,11 @@ class PreviousOrgHistory(BaseOrgHistory):
 class OrgHistory(BaseOrgHistory):
     """Model for tracking the history of actions run against a CumulusCI org profile"""
 
+    org: Optional[Any] = Field(
+        default=None,
+        description="The org instance",
+        exclude=True,
+    )
     org_id: Optional[str] = Field(
         default=None,
         description="The Salesforce org ID",
@@ -1341,6 +1353,15 @@ class OrgHistory(BaseOrgHistory):
         {},
         description="The previous orgs that were created and deleted and their action history.",
     )
+
+    # def dict(self, *args, **kwargs):
+    #     kwargs.setdefault("exclude", [])
+    #     if "org" not in kwargs["exclude"]:
+    #         kwargs["exclude"].append("org")
+    #     kwargs.setdefault("exclude_defaults", True)
+    #     value_only = kwargs.pop("value_only", False)
+    #     obj = super().dict(*args, **kwargs)
+    #     return encode_value(obj, value_only=value_only)
 
     def clear_history(
         self,

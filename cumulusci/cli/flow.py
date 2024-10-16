@@ -92,7 +92,7 @@ def report_predictions(flow_name, predictions, org_config, return_tree: bool = F
         f"[bold green]Flow Predictions for {flow_name} on org {org_config.name}"
     )
 
-    snapshot_hashes = org_config.history.get_snapshot_hash(return_data=True)
+    snapshot_hashes = org_config.history.get_snapshot_hash(return_data=True, scratchdef_path=org_config.config_file)
     starting_snapshot_hash = hash_obj(snapshot_hashes) if snapshot_hashes else None
 
     for step in predictions:
@@ -528,19 +528,6 @@ def flow_run(
             start_from=start_from,
             **get_flow_args,
         )
-        if use_snapshots:
-            console.print(
-                Panel(
-                    (
-                        f"Running flow {flow_name} in predict-only mode without an org\n\n"
-                        "Using snapshot predictions to find matching snapshots for flow layers.\n"
-                        "The flow will first be run in predict mode to calculate hashes, the query\n"
-                        "the DevHub to look for active scratch org snapshots to start the org from."
-                    ),
-                    title="Predicting Flow Hashes",
-                    border_style="bold magenta",
-                )
-            )
 
         continue_from_path = None
         start_time = datetime.now()
