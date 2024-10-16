@@ -110,6 +110,36 @@ def test_install_package_by_version_id__not_propagated(caplog):
     assert "Retrying" in caplog.text
     assert "Success" in caplog.text
 
+@responses.activate
+def test_install_package_by_version_id__not_propagated_custom_error(caplog):
+    caplog.set_level(logging.INFO)
+    responses.add(
+        "POST",
+        f"https://salesforce/services/data/v{CURRENT_SF_API_VERSION}/tooling/sobjects/PackageInstallRequest/",
+        json={"id": "0Hf"},
+    )
+    responses.add(
+        "GET",
+        f"https://salesforce/services/data/v{CURRENT_SF_API_VERSION}/tooling/query/",
+        status=400,
+        body="TEST ERROR",
+    )
+    responses.add(
+        "GET",
+        f"https://salesforce/services/data/v{CURRENT_SF_API_VERSION}/tooling/query/",
+        json={"records": [{"Status": "SUCCESS"}]},
+    )
+
+    project_config = create_project_config()
+    project_config.package.retry_error_messages = ["TEST ERROR"]
+    org_config = OrgConfig(
+        {"instance_url": "https://salesforce", "access_token": "TOKEN"}, "test"
+    )
+    install_package_by_version_id(
+        project_config, org_config, "04t", PackageInstallOptions()
+    )
+    assert "Retrying" in caplog.text
+    assert "Success" in caplog.text
 
 @mock.patch("cumulusci.salesforce_api.package_install.ApiDeploy")
 @mock.patch("cumulusci.salesforce_api.package_install.InstallPackageZipBuilder")

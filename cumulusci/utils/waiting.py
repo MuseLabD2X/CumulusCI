@@ -7,7 +7,8 @@ logger = logging.getLogger(__name__)
 
 def retry(
     func: Callable,
-    should_retry: Callable[[Exception], bool] = lambda e: True,
+    should_retry: Callable[[Exception], bool] = lambda e, retry_error_messages: True,
+    retry_error_messages: list[str] = [],
     retries: int = 5,
     retry_interval: int = 5,
     retry_interval_add: int = 30,
@@ -17,7 +18,7 @@ def retry(
             return func()
             break
         except Exception as e:
-            if not (retries and should_retry(e)):
+            if not (retries and should_retry(e, retry_error_messages)):
                 raise
             if retry_interval:
                 logger.warning(f"Sleeping for {retry_interval} seconds before retry...")

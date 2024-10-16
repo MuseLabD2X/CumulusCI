@@ -1,6 +1,6 @@
 import functools
 import logging
-from typing import Optional, cast
+from typing import List, Optional, cast
 
 from simple_salesforce.api import SFType
 from simple_salesforce.exceptions import SalesforceMalformedRequest
@@ -176,9 +176,12 @@ def _install_package_by_version_id(
     poll(functools.partial(_wait_for_package_install, tooling, request))
 
 
-def _should_retry_package_install(e: Exception) -> bool:
+def _should_retry_package_install(e: Exception, extra_retry_errors: List[str] | None = None) -> bool:
+    retry_errors = RETRY_PACKAGE_ERRORS.copy()
+    if extra_retry_errors is not None:
+        retry_errors.extend(extra_retry_errors)
     return isinstance(e, (SalesforceMalformedRequest, MetadataApiError)) and any(
-        err in str(e) for err in RETRY_PACKAGE_ERRORS
+        err in str(e) for err in retry_errors
     )
 
 
@@ -197,6 +200,7 @@ def _install_package_by_namespace_version(
     retry_options = {
         **(retry_options or {}),
         "should_retry": _should_retry_package_install,
+        "retry_error_messages": project_config.package.retry_error_messages,
     }
 
     def deploy():
@@ -226,6 +230,7 @@ def install_package_by_version_id(
     retry_options = {
         **(retry_options or {}),
         "should_retry": _should_retry_package_install,
+        "retry_error_messages": project_config.package.retry_error_messages,
     }
     retry(
         functools.partial(
@@ -251,6 +256,7 @@ def install_package_by_namespace_version(
     retry_options = {
         **(retry_options or {}),
         "should_retry": _should_retry_package_install,
+        "retry_error_messages": project_config.package.retry_error_messages,
     }
     retry(
         functools.partial(

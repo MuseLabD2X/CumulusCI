@@ -84,6 +84,7 @@ class Package(CCIDictModel):
     uninstall_class: str = None
     api_version: str = None
     metadata_package_id: str = None
+    retry_error_messages: List[str] = []
 
 
 class Test(CCIDictModel):
