@@ -21,7 +21,6 @@ class GitHubSummaryCallback(FlowCallback):
     def pre_flow(self, coordinator: FlowCoordinator):
         self.coordinator = coordinator
         flow_header = f"# 🔄 Flow: {coordinator.name or 'Unnamed Flow'}\n"
-        self._append_to_summary(flow_header, "step")
         self._append_to_summary(flow_header, "job")
 
     def post_flow(self, coordinator: FlowCoordinator):
@@ -35,7 +34,7 @@ class GitHubSummaryCallback(FlowCallback):
         self._append_to_summary(f"{status_emoji} {step.task_name} - {result.result}", "step")
 
     def _generate_job_summary(self, coordinator: FlowCoordinator):
-        overall_status = "✅ Success" if coordinator.action.status == "success" else "❌ Failure"
+        overall_status = "✅ Success" if coordinator.action and coordinator.action.status == "success" else "❌ Failure"
         self._append_to_summary(f"\n## Overall Status: {overall_status}", "job")
 
         self._add_org_info()
