@@ -19,22 +19,18 @@ class GitHubSummaryCallback(FlowCallback):
                 f.write(content + "\n")
 
     def pre_flow(self, coordinator: FlowCoordinator):
-        import pdb; pdb.set_trace()
         self.coordinator = coordinator
         flow_header = f"# 🔄 Flow: {coordinator.name or 'Unnamed Flow'}\n"
         self._append_to_summary(flow_header, "step")
         self._append_to_summary(flow_header, "job")
 
     def post_flow(self, coordinator: FlowCoordinator):
-        import pdb; pdb.set_trace()
         self._generate_job_summary(coordinator)
 
     def pre_task(self, step):
-        import pdb; pdb.set_trace()
         self._append_to_summary(f"\n## 🔹 Task: {step.task_name}", "step")
 
     def post_task(self, step, result):
-        import pdb; pdb.set_trace()
         status_emoji = "✅" if result.exception is None else "❌"
         self._append_to_summary(f"{status_emoji} {step.task_name} - {result.result}", "step")
 
