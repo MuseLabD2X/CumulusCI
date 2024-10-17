@@ -69,7 +69,6 @@ class ScratchOrgConfig(SfdxOrgConfig):
 
     def create_org(self) -> None:
         """Uses sfdx force:org:create to create the org"""
-        import pdb; pdb.set_trace()
         if not self.config_file:
             raise ScratchOrgException(
                 f"Scratch org config {self.name} is missing a config_file"

@@ -1401,7 +1401,8 @@ class OrgHistory(BaseOrgHistory):
     def rotate_org(self, org_config: dict):
         """Rotate the org history to a new org ID"""
         org_id = org_config["org_id"]
-        if org_id in self.previous_orgs.keys():
+        if self.org.config.get("org_id") and org_id in self.previous_orgs.keys():
+            return
             raise OrgHistoryError(f"Org with ID {org_id} already exists in org history")
 
         org_config = copy.deepcopy(org_config)
@@ -1424,6 +1425,7 @@ class OrgHistory(BaseOrgHistory):
             actions=self.actions.copy(),
         )
         self.previous_orgs[org_id].hash_config = self.calculate_config_hash()
+        self.org_id = None
         self.actions = []
         self.hash_config = self.calculate_config_hash()
 

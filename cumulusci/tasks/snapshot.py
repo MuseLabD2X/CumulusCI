@@ -424,7 +424,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
                 ),
                 state="success" if active else "error",
             )
-        if self.is_github_job and self.parsed_options.environment_prefix:
+        if self.is_github_job and self.parsed_options.create_environment:
             self._create_github_environment(snapshot_name)
 
     def _should_create_snapshot(self):
