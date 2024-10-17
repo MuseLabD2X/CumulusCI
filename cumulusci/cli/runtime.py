@@ -26,8 +26,8 @@ logger = getLogger(__name__)
 IS_GITHUB_ACTIONS = os.environ.get("GITHUB_ACTIONS") == "true"
 
 class CliRuntime(BaseCumulusCI):
-    clallback_class = FlowCallback if not IS_GITHUB_ACTIONS else GitHubSummaryCallback
     def __init__(self, *args, **kwargs):
+        self.callback_class = FlowCallback if not IS_GITHUB_ACTIONS else GitHubSummaryCallback
         try:
             super(CliRuntime, self).__init__(*args, **kwargs)
         except ConfigError as e:
