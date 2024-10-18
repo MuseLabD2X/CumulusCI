@@ -18,11 +18,8 @@ class GetPackageDataFromCommitStatus(BaseGithubTask, BaseSalesforceApiTask):
     }
     declarations = TaskDeclarations(
         can_predict_hashes=True,
-        packages=PackagesDeclaration(
-            installs=False,
-            upgrades=False,
-            description="The task looks up package version to be installed by a later task via return_values",
-        ),
+        can_rerun_safely=True,
+        packages=None,
     )
 
     def _run_task(self):
@@ -43,7 +40,7 @@ class GetPackageDataFromCommitStatus(BaseGithubTask, BaseSalesforceApiTask):
                     "or that a feature test package has not yet been built."
                 )
 
-        if version_id:
+        if version_id and not self.predict:
             dependencies = self._get_dependencies(version_id)
         else:
             raise DependencyLookupError(
