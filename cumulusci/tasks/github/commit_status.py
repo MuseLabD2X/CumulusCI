@@ -19,6 +19,8 @@ class GetPackageDataFromCommitStatus(BaseGithubTask, BaseSalesforceApiTask):
     declarations = TaskDeclarations(
         can_predict_hashes=True,
         packages=PackagesDeclaration(
+            installs=False,
+            upgrades=False,
             description="The task looks up package version to be installed by a later task via return_values",
         ),
     )

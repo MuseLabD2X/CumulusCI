@@ -80,7 +80,7 @@ class BaseDeclaration(CCIDictModel):
     @root_validator(pre=True)
     def validate_config(cls, values):  # pylint: disable=no-self-argument
         description = values.pop("description")
-        if not any(values.values()):
+        if not any(values.values() == None):
             raise DeclarationConfigError(
                 f"At least one {', '.join(list(values.keys()))} must be set"
             )
