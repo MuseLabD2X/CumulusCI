@@ -132,10 +132,13 @@ def get_github_api_for_repo(keychain, repo_url, session=None) -> GitHub:
             try:
                 installation = gh.app_installation_for_repository(owner, repo_name)
             except github3.exceptions.NotFoundError:
-                raise GithubException(
-                    f"Could not access {owner}/{repo_name} using GitHub app. "
-                    "Does the app need to be installed for this repository?"
-                )
+                if GITHUB_TOKEN:
+                    gh.login(token=GITHUB_TOKEN)
+                else:
+                    raise GithubException(
+                        f"Could not access {owner}/{repo_name} using GitHub app. "
+                        "Does the app need to be installed for this repository?"
+                    )
             INSTALLATIONS[(owner, repo_name)] = installation
         gh.login_as_app_installation(APP_KEY, APP_ID, installation.id)
     elif GITHUB_TOKEN:
