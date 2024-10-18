@@ -320,7 +320,7 @@ class TaskRunner:
     def from_flow(cls, flow: "FlowCoordinator", step: StepSpec) -> "TaskRunner":
         return cls(step, flow.org_config, flow=flow)
 
-    def _init_task(self, **options) -> "BaseTask":
+    def _init_task(self, predictions: list | None = None, **options) -> "BaseTask":
         """
         Initialize a task.
 
@@ -331,7 +331,7 @@ class TaskRunner:
         task_config = self.step.task_config.copy()
         task_config["options"] = task_config.get("options", {}).copy()
         assert self.flow
-        self.flow.resolve_return_value_options(task_config["options"])
+        self.flow.resolve_return_value_options(task_config["options"], predictions)
 
         task_config["options"].update(options)
 
@@ -346,13 +346,13 @@ class TaskRunner:
             flow=self.flow,
         )
 
-    def predict_step(self, **options) -> "StepPrediction":
+    def predict_step(self, predictions: list | None = None, **options) -> "StepPrediction":
         """
         Predict a step.
 
         :return: StepResult
         """
-        task = self._init_task(**options)
+        task = self._init_task(predictions=predictions, **options)
         tracker = task(predict=True)
         return StepPrediction.from_step(
             self.step,
@@ -862,7 +862,7 @@ class FlowCoordinator:
         installed = defaultdict(list)
         try:
             for step in self.steps:
-                prediction = self._run_step(step, predict=True)
+                prediction = self._run_step(step, predict=True, predictions=predictions)
                 if prediction and prediction.tracker:
                     if prediction.tracker.package_installs:
                         for package_install in prediction.tracker.package_installs:
@@ -888,10 +888,8 @@ class FlowCoordinator:
             return predictions
         except Exception as e:
             raise e from e
-        finally:
-            self.callbacks.post_flow(self)
 
-    def _run_step(self, step: StepSpec, predict: bool = False):
+    def _run_step(self, step: StepSpec, predict: bool = False, predictions: list = None):
         if step.skip:
             self._rule(fill="*")
             self.logger.info(f"Skipping task: {step.task_name}")
@@ -931,7 +929,7 @@ class FlowCoordinator:
 
         self.callbacks.pre_task(step)
         if predict:
-            prediction = TaskRunner.from_flow(self, step).predict_step()
+            prediction = TaskRunner.from_flow(self, step).predict_step(predictions=predictions)
             if not prediction:
                 return StepPrediction.from_step(
                     step,
@@ -1197,16 +1195,19 @@ class FlowCoordinator:
             self.org_config.refresh_oauth_token(self.project_config.keychain)
 
 
-    def resolve_return_value_options(self, options):
+    def resolve_return_value_options(self, options, predictions: list | None = None):
         """Handle dynamic option value lookups in the format ^^task_name.attr"""
         for key, value in options.items():
             if isinstance(value, str) and value.startswith(RETURN_VALUE_OPTION_PREFIX):
                 path, name = value[len(RETURN_VALUE_OPTION_PREFIX) :].rsplit(".", 1)
-                result = self._find_result_by_path(path)
-                options[key] = result.return_values.get(name)
+                result = self._find_result_by_path(path, predictions)
+                if isinstance(result, StepPrediction) and result.tracker:
+                    options[key] = result.tracker.return_values.get(name)
+                else:
+                    options[key] = result.return_values.get(name)
 
-    def _find_result_by_path(self, path):
-        for result in self.results:
+    def _find_result_by_path(self, path, predictions: list | None = None):
+        for result in predictions or self.results:
             if result.path[-len(path) :] == path:
                 return result
         raise NameError(f"Path not found: {path}")

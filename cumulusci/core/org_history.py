@@ -789,7 +789,10 @@ class BaseTaskAction(BaseAction):
             description="The package installs executed by the task",
         )
     )
-
+    return_values: dict = Field(
+        ...,
+        description="The return values of the task",
+    )
     def get_config_hash_data(self, static: bool = True):
         deploy_hashes = []
         if self.deploys:
@@ -857,10 +860,7 @@ class TaskOrgAction(BaseTaskAction, BaseOrgActionResult):
     """Model for the outcome of a single task run against an org"""
 
     action_type: Literal["Task"] = Field()
-    return_values: dict = Field(
-        ...,
-        description="The return values of the task",
-    )
+
 
     def get_runnable_dependencies(self, project_config):
         """Return a list of dependencies that are valid input ProjectDependencies"""

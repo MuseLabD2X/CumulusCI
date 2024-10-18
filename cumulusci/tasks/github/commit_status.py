@@ -40,14 +40,18 @@ class GetPackageDataFromCommitStatus(BaseGithubTask, BaseSalesforceApiTask):
                     "or that a feature test package has not yet been built."
                 )
 
-        if version_id and not self.predict:
-            dependencies = self._get_dependencies(version_id)
+        if version_id:
+            if not self.predict:
+                dependencies = self._get_dependencies(version_id)
         else:
             raise DependencyLookupError(
                 f"Could not find package version id in '{context}' commit status for commit {commit_sha}."
             )
 
         self.return_values = {"dependencies": dependencies, "version_id": version_id}
+
+        if self.predict:
+            return self.tracker
 
     def _predict(self):
         return self._run_task()

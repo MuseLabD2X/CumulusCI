@@ -1,5 +1,9 @@
 from cumulusci.cli.runtime import click
 
+from cumulusci.core.declarations import (
+    PackagesDeclaration,
+    TaskDeclarations,
+)
 from cumulusci.core.dependencies.dependencies import (
     GitHubDynamicDependency,
     PackageInstallOptions,
@@ -56,6 +60,16 @@ class InstallPackageVersion(BaseSalesforceApiTask):
         },
         **PACKAGE_INSTALL_TASK_OPTIONS,
     }
+    declarations = TaskDeclarations(
+        can_predict_hashes=True,
+        can_rerun_safely=True,
+        packages=PackagesDeclaration(
+            installs=True,
+            upgrades=True,
+            uninstalls=False,
+            description="Install or upgrade a package version specified by the {version} and {namespace} options. Special versions 'latest' and 'latest_beta' can be used to trigger lookup via Github Releases on the repository.",
+        ),
+    )
 
     def _init_options(self, kwargs):
         super()._init_options(kwargs)
@@ -186,12 +200,14 @@ class InstallPackageVersion(BaseSalesforceApiTask):
             if not click.confirm("Continue to install dependencies?", default=True):
                 raise CumulusCIException("Dependency installation was canceled.")
 
-        dep.install(
-            self.project_config,
-            self.org_config,
-            self.install_options,
-            self.retry_options,
-        )
+        if not self.predict:
+            dep.install(
+                self.project_config,
+                self.org_config,
+                self.install_options,
+                self.retry_options,
+            )
+
         package_type = (
             "managed_1gp"
             if isinstance(dep, PackageNamespaceVersionDependency)
@@ -211,6 +227,10 @@ class InstallPackageVersion(BaseSalesforceApiTask):
         )
 
         self.org_config.reset_installed_packages()
+
+    def _predict(self):
+        self._run_task()
+        return self.tracker
 
     def freeze(self, step):
         if self.options["interactive"]:

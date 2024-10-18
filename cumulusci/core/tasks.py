@@ -168,6 +168,7 @@ class BaseTask:
             repo=self.project_config.repo_url,
             branch=self.project_config.repo_branch,
             commit=self.project_config.repo_commit,
+            return_values = {},
         )
 
     def _init_logger(self):
@@ -300,6 +301,8 @@ class BaseTask:
                         if predict:
                             tracker = self._predict()
                             self.predict = False
+                            if tracker:
+                                tracker.return_values = self.return_values
                             return tracker
                         self.result = self._run_task()
                         self._record_result()
@@ -651,7 +654,7 @@ class BaseTask:
             action = ActionPackageInstall.parse_obj(kwargs)
         self.tracker.package_installs.append(action)
 
-    def _record_result(self, exception=None) -> None:
+    def _record_result(self, exception=None, predict: bool = False) -> None:
         data = self.tracker.dict()
         if exception:
             if isinstance(exception, CumulusCIFailure):
