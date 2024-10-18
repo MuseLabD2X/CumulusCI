@@ -280,7 +280,7 @@ def history_list(
     console.print()
 
 
-@history.command(name="info", help="Display information for a specific action hash")
+@history.command(name="info", help="Display information for a specific action hash. Use the hash `last` to get the info on the last action.")
 @click.argument("action_hash")
 @orgname_option_or_argument(required=False)
 @click.option(
@@ -296,14 +296,17 @@ def history_list(
     help="Lookup the action in the history of a previous org instance by org id.",
 )
 @pass_runtime(require_project=True, require_keychain=True)
-def history_info(runtime, org_name, action_hash, data, print_json, indent, org_id):
+def history_info(runtime, org_name, action_hash, data=False, print_json=False, indent=None, org_id=None):
     org_name, org_config = runtime.get_org(org_name, check_expired=False)
 
-    org_history = org_config.history
+    history = org_config.history
     if org_id:
-        org_history = org_config.history.previous_orgs.get(org_id)
+        history = history.previous_orgs.get(org_id)
 
-    action = org_history.get_action_by_hash(action_hash)
+    if action_hash == "last":
+        action = history.actions[-1]
+    else:
+        action = history.get_action_by_hash(action_hash)
 
     if data:
         hash_content = action.get_org_tracker_hash(return_data=True)

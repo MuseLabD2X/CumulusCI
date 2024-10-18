@@ -232,7 +232,7 @@ class NameContextOptions(CCIOptions):
     )
 
 
-class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTask):
+class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask):
     """Base class for tasks that create Scratch Org Snapshots."""
 
     # Peg to API Version 60.0 for OrgSnapshot object
@@ -275,7 +275,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
         self.start_time = None
 
     def _init_task(self):
-        super()._init_task()
+        BaseGithubTask._init_task(self)
         self.devhub = self._get_devhub_api()
         self.console = Console()
         self.is_github_job = os.getenv("GITHUB_ACTIONS") == "true"
@@ -322,7 +322,7 @@ class BaseCreateOrgSnapshot(BaseDevhubTask, BaseGithubTask, BaseSalesforceApiTas
         self.description = {
             "pr": None,
             "org": self.org_config.name if self.org_config else None,
-            "hash": self.org_config.history.get_snapshot_hash(),
+            "hash": self.org_config.history.get_snapshot_hash() if self.org_config else None,
             "commit": (
                 self.project_config.repo_commit[:7]
                 if self.project_config.repo_commit
@@ -801,7 +801,8 @@ class GithubPullRequestSnapshot(BaseCreateOrgSnapshot):
         pass
 
     api_version = "60.0"
-    salesforce_task = True
+    # In order to support check-only mode, enforced later
+    salesforce_task = False
 
     def __init__(self, *args, **kwargs):
         self.pull_request = None
