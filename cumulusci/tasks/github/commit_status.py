@@ -1,3 +1,7 @@
+from cumulusci.core.declarations import (
+    TaskDeclarations,
+    PackagesDeclaration,
+)
 from cumulusci.core.exceptions import DependencyLookupError
 from cumulusci.core.github import get_version_id_from_commit
 from cumulusci.tasks.github.base import BaseGithubTask
@@ -12,6 +16,12 @@ class GetPackageDataFromCommitStatus(BaseGithubTask, BaseSalesforceApiTask):
         },
         "version_id": {"description": "Package version id"},
     }
+    declarations = TaskDeclarations(
+        can_predict_hashes=True,
+        packages=PackagesDeclaration(
+            description="The task looks up package version to be installed by a later task via return_values",
+        ),
+    )
 
     def _run_task(self):
         self.api_version = self.project_config.project__api_version
@@ -39,6 +49,9 @@ class GetPackageDataFromCommitStatus(BaseGithubTask, BaseSalesforceApiTask):
             )
 
         self.return_values = {"dependencies": dependencies, "version_id": version_id}
+
+    def _predict(self):
+        return self._run_task()
 
     def _get_dependencies(self, version_id):
         res = self.tooling.query(
