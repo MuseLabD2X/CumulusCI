@@ -20,6 +20,7 @@ from cumulusci.oauth.client import (
 )
 from cumulusci.salesforce_api.utils import get_simple_salesforce_connection
 from cumulusci.utils import parse_api_datetime
+from cumulusci.utils.serialization import json_dumps
 
 from .runtime import CliRuntime, pass_runtime
 
@@ -310,7 +311,7 @@ def org_info(runtime, org_name, print_json):
     console = Console()
     if print_json:
         click.echo(
-            json.dumps(
+            json_dumps(
                 org_config.config,
                 sort_keys=True,
                 indent=4,
