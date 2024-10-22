@@ -129,7 +129,6 @@ class OrgToEnvironment(BaseGithubTask):
         self.org_config._sfdx_info = sfdx_info
         org_info = {
             "secrets": {
-                "ACCESS_TOKEN": sfdx_info["access_token"],
                 "SFDX_AUTH_URL": sfdx_info["instance_url"],
             },
             "variables": {
