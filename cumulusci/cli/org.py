@@ -694,8 +694,9 @@ def org_from_snapshot(
 
     click.echo(f"Creating scratch org...")
     _, org_config = runtime.get_org(org_name)
-    org_id = org_config.org_id
-    click.echo(f"Created scratch org: {org_id}")
+    with org_config.save_if_changed():
+        org_id = org_config.org_id
+        click.echo(f"Created scratch org: {org_id}")
 
 
 @org.command(
