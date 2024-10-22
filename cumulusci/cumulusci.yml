@@ -81,6 +81,10 @@ tasks:
         description: Waits on a batch apex or queueable apex job to finish.
         class_path: cumulusci.tasks.apex.batch.BatchApexWait
         group: Salesforce
+    check_components:
+        description: "Check if common components exist in the target org based on provided deploy paths or those from a plan/flow."
+        class_path: cumulusci.tasks.salesforce.check_components.CheckComponents
+        group: Salesforce Preflight Checks
     check_dataset_load:
         description: Runs as a preflight check to determine whether dataset can be loaded successfully.
         class_path: cumulusci.tasks.preflight.dataset_load.LoadDataSetCheck
@@ -383,6 +387,10 @@ tasks:
     github_copy_subtree:
         description: Copies one or more subtrees from the project repository for a given release to a target repository, with the option to include release notes.
         class_path: cumulusci.tasks.github.publish.PublishSubtree
+        group: GitHub
+    github_org_to_env:
+        description: Publishes an org's credentials and info as a GitHub Environment. This task will create or update an environment with the same ORG_ID value automatically.
+        class_path: cumulusci.tasks.github.environments.OrgToEnvironment
         group: GitHub
     github_package_data:
         description: Look up 2gp package dependencies for a version id recorded in a commit status.
@@ -1520,7 +1528,7 @@ project:
         namespace:
         install_class:
         uninstall_class:
-        api_version: "61.0"
+        api_version: "62.0"
     git:
         default_branch: master
         prefix_feature: feature/

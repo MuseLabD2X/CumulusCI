@@ -17,7 +17,10 @@ class SfdxOrgConfig(OrgConfig):
     def sfdx_info(self):
         if hasattr(self, "_sfdx_info"):
             return self._sfdx_info
+        self._sfdx_info = self.get_sfdx_info()
+        return self._sfdx_info
 
+    def get_sfdx_info(self, verbose: bool = False):
         # On-demand creation of scratch orgs
         if self.createable and not self.created:
             if self.config.get("org_id") and self.track_history:
@@ -32,7 +35,11 @@ class SfdxOrgConfig(OrgConfig):
 
         # Call force:org:display and parse output to get instance_url and
         # access_token
-        p = sfdx("force:org:display --json", self.username)
+        command = f"force:org:display --json"
+        if verbose:
+            self.logger.warning("Using --verbose mode to retrieve the sfdxAuthUrl")
+            command += " --verbose"
+        p = sfdx(command, self.username)
 
         org_info = None
         stderr_list = [line.strip() for line in p.stderr_text]
@@ -66,9 +73,10 @@ class SfdxOrgConfig(OrgConfig):
         }
         if org_info["result"].get("password"):
             sfdx_info["password"] = org_info["result"]["password"]
-        self._sfdx_info = sfdx_info
-        self._sfdx_info_date = datetime.datetime.utcnow()
-        self.config.update(sfdx_info)
+        if not verbose:
+            self._sfdx_info = sfdx_info
+            self._sfdx_info_date = datetime.datetime.utcnow()
+            self.config.update(sfdx_info)
 
         sfdx_info.update(
             {
@@ -76,6 +84,10 @@ class SfdxOrgConfig(OrgConfig):
                 "expiration_date": org_info["result"].get("expirationDate"),
             }
         )
+
+        if verbose:
+            # Add the sfdx_auth_url to output but don't store in org config
+            sfdx_info["sfdx_auth_url"] = org_info["result"].get("sfdxAuthUrl")
         return sfdx_info
 
     @property

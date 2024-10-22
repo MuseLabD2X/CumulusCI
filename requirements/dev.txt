@@ -30,7 +30,9 @@ certifi==2024.2.2
     #   requests
     #   snowfakery
 cffi==1.17.1
-    # via cryptography
+    # via
+    #   cryptography
+    #   pynacl
 cfgv==3.4.0
     # via pre-commit
 chardet==5.2.0
@@ -47,11 +49,11 @@ click==8.1.7
     #   snowfakery
 colorama==0.4.6
     # via tox
-coverage[toml]==7.6.2
+coverage[toml]==7.6.4
     # via
     #   cumulusci (pyproject.toml)
     #   pytest-cov
-cryptography==43.0.1
+cryptography==43.0.3
     # via
     #   authlib
     #   cumulusci (pyproject.toml)
@@ -176,7 +178,7 @@ pre-commit==4.0.1
     # via cumulusci (pyproject.toml)
 propcache==0.2.0
     # via yarl
-psutil==6.0.0
+psutil==6.1.0
     # via cumulusci (pyproject.toml)
 py==1.11.0
     # via pytest
@@ -199,6 +201,8 @@ pyjwt[crypto]==2.9.0
     # via
     #   cumulusci (pyproject.toml)
     #   github3-py
+pynacl==1.5.0
+    # via cumulusci (pyproject.toml)
 pyproject-api==1.8.0
     # via tox
 pytest==7.0.1
@@ -256,7 +260,7 @@ rich==13.9.2
     #   rich-click
 rich-click==1.8.3
     # via cumulusci (pyproject.toml)
-robotframework==7.1
+robotframework==7.1.1
     # via
     #   cumulusci (pyproject.toml)
     #   robotframework-pabot
@@ -331,7 +335,7 @@ testfixtures==8.3.0
     # via cumulusci (pyproject.toml)
 tomli==2.0.2
     # via pytest
-tox==4.21.2
+tox==4.23.1
     # via cumulusci (pyproject.toml)
 typeguard==2.13.3
     # via cumulusci (pyproject.toml)
@@ -358,15 +362,15 @@ vcrpy==6.0.2
     # via
     #   cumulusci (pyproject.toml)
     #   pytest-vcr
-virtualenv==20.26.6
+virtualenv==20.27.0
     # via
     #   pre-commit
     #   tox
 wrapt==1.16.0
     # via vcrpy
-xmltodict==0.14.1
+xmltodict==0.14.2
     # via cumulusci (pyproject.toml)
-yarl==1.15.1
+yarl==1.16.0
     # via vcrpy
 zipp==3.20.2
     # via importlib-metadata

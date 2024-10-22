@@ -15,7 +15,9 @@ certifi==2024.2.2
     #   requests
     #   snowfakery
 cffi==1.17.1
-    # via cryptography
+    # via
+    #   cryptography
+    #   pynacl
 charset-normalizer==3.3.2
     # via
     #   requests
@@ -25,7 +27,7 @@ click==8.1.7
     #   cumulusci (pyproject.toml)
     #   rich-click
     #   snowfakery
-cryptography==43.0.1
+cryptography==43.0.3
     # via
     #   authlib
     #   cumulusci (pyproject.toml)
@@ -79,7 +81,7 @@ mdurl==0.1.2
     # via markdown-it-py
 natsort==8.4.0
     # via robotframework-pabot
-psutil==6.0.0
+psutil==6.1.0
     # via cumulusci (pyproject.toml)
 pycparser==2.22
     # via cffi
@@ -93,6 +95,8 @@ pyjwt[crypto]==2.9.0
     # via
     #   cumulusci (pyproject.toml)
     #   github3-py
+pynacl==1.5.0
+    # via cumulusci (pyproject.toml)
 python-baseconv==1.2.2
     # via snowfakery
 python-dateutil==2.9.0.post0
@@ -124,7 +128,7 @@ rich==13.9.2
     #   rich-click
 rich-click==1.8.3
     # via cumulusci (pyproject.toml)
-robotframework==7.1
+robotframework==7.1.1
     # via
     #   cumulusci (pyproject.toml)
     #   robotframework-pabot
@@ -182,7 +186,7 @@ urllib3==1.26.18
     #   requests
     #   selenium
     #   snowfakery
-xmltodict==0.14.1
+xmltodict==0.14.2
     # via cumulusci (pyproject.toml)
 zipp==3.20.2
     # via importlib-metadata
