@@ -610,7 +610,6 @@ def catch_common_github_auth_errors(func: Callable) -> Callable:
         try:
             return func(*args, **kwargs)
         except ConnectionError as exc:
-        except ConnectionError as exc:
             if error_msg := format_github3_exception(exc):
                 raise GithubApiError(error_msg) from exc
             else:
