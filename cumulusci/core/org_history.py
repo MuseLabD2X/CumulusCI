@@ -235,10 +235,16 @@ class ActionCommandExecution(BaseAction):
             values["hash"] = hash_obj(command)
         return values
 
-    @validator("output", pre=True)
-    def mask_output(cls, v):
-        # Mask accessToken in output
-        v = mask_in_json(v)
+    @root_validator(pre=True)
+    def mask_output(cls, values):
+        keys = ["output", "stderr"]
+        words = ["password", "token", "secret"]
+        for key in keys:
+            if key in values:
+                for line in values[key].split("\n"):
+                    if any(word in line.lower() for word in words):
+                        values[key] = values[key].replace(line, "********")
+        return values
 
 
 class BaseMetadataApi(BaseAction):
