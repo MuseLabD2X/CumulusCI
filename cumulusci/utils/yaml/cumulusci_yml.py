@@ -162,6 +162,7 @@ class ScratchOrg(CCIDictModel):
     release: Literal["preview", "previous"] = None
     track_history: bool = False
     use_snapshots: bool = False
+    snapshot_name: str = None
 
 
 class Orgs(CCIDictModel):

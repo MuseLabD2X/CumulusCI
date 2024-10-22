@@ -87,7 +87,7 @@ class ScratchOrgConfig(SfdxOrgConfig):
             "branch": self.keychain.project_config.repo_branch,
             "commit": self.keychain.project_config.repo_commit,
             "scratch_org": self.keychain.project_config.lookup(
-                f"orgs__scratch__{self.name}"
+                f"orgs__scratch__{self.config_name}"
             ),
             "config": {
                 "source_path": os.path.abspath(self.config_file),
@@ -102,17 +102,38 @@ class ScratchOrgConfig(SfdxOrgConfig):
 
         @contextlib.contextmanager
         def temp_scratchdef_file():
+            snapshot_description = None
             if self.use_snapshot_hashes:
                 if not self.snapshot_hashes:
                     raise ScratchOrgException(
                         "Snapshot hashes are required when use_snapshot_hashes is True"
                     )
-                snapshot_hash = self.snapshot_hashes[-1]
+                hashed_snapshot = self.snapshot_hashes[-1]
+                snapshot_name = hashed_snapshot.get("snapshot", {}).get("SnapshotName")
+                if not snapshot_name:
+                    raise ScratchOrgException(
+                        "Snapshot hashes must contain a snapshot with a SnapshotName"
+                    )
+                snapshot_hash = hashed_snapshot.get("snapshot_hash")
+                if not snapshot_hash:
+                    raise ScratchOrgException(
+                        "Snapshot hashes must contain a snapshot_hash"
+                    )
+                snapshot_description = (
+                    f" created from snapshot matched by hash {snapshot_hash}"
+                )
+                self.snapshot_name = snapshot_name
+            if self.snapshot_name:
+                if snapshot_description is None:
+                    snapshot_description = (
+                        f" created from snapshot {self.snapshot_name}"
+                    )
+                org_action_info["config"]["snapshot"] = self.snapshot_name
                 with NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
                     json.dump(
                         config.to_snapshot_scratchdef(
-                            snapshot=snapshot_hash["snapshot"]["SnapshotName"],
-                            description=f" via snapshot matched by hash {snapshot_hash['snapshot_hash']}",
+                            snapshot=self.snapshot_name,
+                            description=snapshot_description,
                         ),
                         f,
                     )
@@ -159,7 +180,7 @@ class ScratchOrgConfig(SfdxOrgConfig):
 
         with temp_scratchdef_file() as config_file:
             args: List[str] = []
-            if self.use_snapshot_hashes:
+            if self.snapshot_name:
                 args.extend(self._build_org_create_args(config_file))
             else:
                 args.extend(self._build_org_create_args())

@@ -418,7 +418,9 @@ def _make_tables(json_data: dict):
     scratch_keys = [
         key for key, row_dict in json_data.items() if row_dict.pop("is_scratch")
     ]
-    scratch_data = [["Default", "Name", "Days", "Expired", "Config", "Domain"]]
+    scratch_data = [
+        ["Default", "Name", "Days", "Expired", "Config", "Snapshot", "Domain"]
+    ]
     scratch_data.extend([list(json_data.pop(k).values()) for k in scratch_keys])
 
     rows_to_dim = [row_index for row_index, row in enumerate(scratch_data) if row[3]]
@@ -457,6 +459,7 @@ def _format_scratch_org_data(org_config):
         "days": org_days,
         "expired": org_config.expired,
         "config": org_config.config_name,
+        "snapshot": org_config.config.get("snapshot_name", ""),
         "domain": domain,
         "is_scratch": True,
     }
@@ -605,6 +608,94 @@ def org_scratch(
         click.echo(f"{org_name} is now the default org")
     else:
         click.echo(f"{org_name} is configured for use")
+
+
+@org.command(
+    name="from_snapshot",
+    help="Creates a scratch org from a snapshot and connects it to the keychain",
+)
+@click.argument("config_name")
+@click.argument("snapshot_name")
+@orgname_option_or_argument(required=True)
+@click.option(
+    "--default",
+    is_flag=True,
+    help="If set, sets the connected org as the new default org",
+)
+@click.option(
+    "--devhub",
+    help="If provided, overrides the Dev Hub used to create the scratch org. NOTE: Scratch Org Snapshots are specific to the Dev Hub they were created in.",
+)
+@click.option(
+    "--days",
+    help="If provided, overrides the scratch config default days value for how many days the scratch org should persist",
+)
+@click.option(
+    "--no-password", is_flag=True, help="If set, don't set a password for the org"
+)
+@click.option(
+    "--release",
+    help="If provided, specify either previous or preview when creating a scratch org",
+)
+@click.option(
+    "--delay-create",
+    is_flag=True,
+    help="If set, do not create the scratch org, only connect it to the keychain",
+)
+@pass_runtime(require_keychain=True)
+def org_from_snapshot(
+    runtime,
+    config_name,
+    snapshot_name,
+    org_name,
+    default,
+    devhub,
+    days,
+    no_password,
+    release=None,
+    delay_create=False,
+):
+    runtime.check_org_overwrite(org_name)
+    release_options = ["previous", "preview"]
+    if release and release not in release_options:
+        raise click.UsageError(
+            "Release options value is not valid. Either specify preview or previous."
+        )
+
+    scratch_configs = runtime.project_config.lookup("orgs__scratch")
+    if not scratch_configs:
+        raise click.UsageError("No scratch org configs found in cumulusci.yml")
+    scratch_config = scratch_configs.get(config_name)
+    if not scratch_config:
+        raise click.UsageError(
+            f"No scratch org config named {config_name} found in the cumulusci.yml file"
+        )
+
+    if devhub:
+        scratch_config["devhub"] = devhub
+
+    scratch_config["snapshot_name"] = snapshot_name
+
+    runtime.keychain.create_scratch_org(
+        org_name, config_name, days, set_password=not (no_password), release=release
+    )
+
+    if default:
+        runtime.keychain.set_default_org(org_name)
+        click.echo(f"{org_name} is now the default org")
+    else:
+        click.echo(f"{org_name} is configured for use")
+
+    if delay_create:
+        click.echo(
+            f"Org {org_name} is configured for use. The org will be created on access such as running a task, flow, or using `cci org info {org_name}`."
+        )
+        return
+
+    click.echo(f"Creating scratch org...")
+    _, org_config = runtime.get_org(org_name)
+    org_id = org_config.org_id
+    click.echo(f"Created scratch org: {org_id}")
 
 
 @org.command(

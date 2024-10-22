@@ -75,8 +75,8 @@ class OrgConfig(BaseConfig):
 
     use_snapshot_hashes: bool = None
     snapshot_hashes: list = None
-    snapshot_name: str = None  # For storing the actual snapshot name used
-    snapshot_id: str = None  # For storing the actual snapshot id used
+    snapshot_name: str = None
+    snapshot_id: str = None
 
     # make sure it can be mocked for tests
     OAuth2Client = OAuth2Client
@@ -87,6 +87,8 @@ class OrgConfig(BaseConfig):
 
         self.name = name
         self.force_sandbox = config.get("sandbox", False) if config else False
+        self.snapshot_hashes = []
+        self.snapshot_name = config.get("snapshot_name")
         self._community_info_cache = {}
         self._latest_api_version = None
         self._installed_packages = None
