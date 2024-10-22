@@ -466,6 +466,15 @@
                     "title": "Track History",
                     "default": false,
                     "type": "boolean"
+                },
+                "use_snapshots": {
+                    "title": "Use Snapshots",
+                    "default": false,
+                    "type": "boolean"
+                },
+                "snapshot_name": {
+                    "title": "Snapshot Name",
+                    "type": "string"
                 }
             },
             "additionalProperties": false
