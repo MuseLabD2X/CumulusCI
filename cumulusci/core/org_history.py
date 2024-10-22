@@ -235,10 +235,10 @@ class ActionCommandExecution(BaseAction):
             values["hash"] = hash_obj(command)
         return values
 
-    # @validator("output", pre=True)
-    # def mask_output(cls, v):
-    #     # Mask accessToken in output
-    #     v = mask_in_json(v)
+    @validator("output", pre=True)
+    def mask_output(cls, v):
+        # Mask accessToken in output
+        v = mask_in_json(v)
 
 
 class BaseMetadataApi(BaseAction):
@@ -793,6 +793,7 @@ class BaseTaskAction(BaseAction):
         ...,
         description="The return values of the task",
     )
+
     def get_config_hash_data(self, static: bool = True):
         deploy_hashes = []
         if self.deploys:
@@ -860,7 +861,6 @@ class TaskOrgAction(BaseTaskAction, BaseOrgActionResult):
     """Model for the outcome of a single task run against an org"""
 
     action_type: Literal["Task"] = Field()
-
 
     def get_runnable_dependencies(self, project_config):
         """Return a list of dependencies that are valid input ProjectDependencies"""

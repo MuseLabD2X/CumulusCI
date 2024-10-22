@@ -50,7 +50,7 @@ class OrgToEnvironment(BaseGithubTask):
         self.console.print(f"Updating secrets {','.join(org_info['secrets'].keys())}")
         self._update_secrets(self.parsed_options.environment_name, org_info["secrets"])
         self.console.print(
-            f"Updating variables {",".join(org_info['variables'].keys())}"
+            f"Updating variables {','.join(org_info['variables'].keys())}"
         )
         self._update_variables(
             self.parsed_options.environment_name, org_info["variables"]
