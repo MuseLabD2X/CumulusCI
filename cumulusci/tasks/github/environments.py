@@ -199,6 +199,8 @@ class OrgToEnvironment(BaseGithubTask):
 
     def _update_variable(self, key, value):
         """Update a variable in the GitHub environment."""
+        if value is None:
+            value = "None"
         resp = self.repo._patch(
             f"{self.repo.url}/environments/{self.parsed_options.environment_name}/variables/{key}",
             json={"value": value},
