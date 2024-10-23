@@ -206,7 +206,7 @@ class OrgToEnvironment(BaseGithubTask):
                 f"Environment {self.parsed_options.environment_name} not found."
             )
         resp.raise_for_status()
-        return resp.json()
+        return resp
 
     def _update_variables(self, environment_name, variables):
         """Create or update the GitHub environment with the Salesforce org info."""
