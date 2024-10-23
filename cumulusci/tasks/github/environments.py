@@ -179,8 +179,6 @@ class OrgToEnvironment(BaseGithubTask):
 
     def _create_variable(self, key, value):
         """Create a variable in the GitHub environment."""
-        if value is None:
-            value = "None"
         resp = self.repo._post(
             f"{self.repo.url}/environments/{self.parsed_options.environment_name}/variables",
             headers={
@@ -199,8 +197,6 @@ class OrgToEnvironment(BaseGithubTask):
 
     def _update_variable(self, key, value):
         """Update a variable in the GitHub environment."""
-        if value is None:
-            value = "None"
         resp = self.repo._patch(
             f"{self.repo.url}/environments/{self.parsed_options.environment_name}/variables/{key}",
             json={"value": value},
@@ -216,6 +212,8 @@ class OrgToEnvironment(BaseGithubTask):
         """Create or update the GitHub environment with the Salesforce org info."""
         existing_variables = self._get_environment_variables()
         for key, value in variables.items():
+            if value is None:
+                value = "None"
             if key in existing_variables:
                 if existing_variables[key] == value:
                     self.logger.info(
