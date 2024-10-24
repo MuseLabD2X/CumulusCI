@@ -129,7 +129,7 @@ class OrgToEnvironment(BaseGithubTask):
         self.org_config._sfdx_info = sfdx_info
         org_info = {
             "secrets": {
-                "SFDX_AUTH_URL": sfdx_info["instance_url"],
+                "SFDX_AUTH_URL": sfdx_info["sfdx_auth_url"],
             },
             "variables": {
                 "CUMULUSCI_CONFIG": self.org_config.config_name,
@@ -175,7 +175,9 @@ class OrgToEnvironment(BaseGithubTask):
         public_key = self._get_public_key()
         for key, value in secrets.items():
             self._update_secret(key, value, public_key)
-            self.logger.info(f"Updated secret {key} in environment {environment_name}")
+            self.logger.info(
+                f"Updated secret {key} in environment {environment_name} to {value}"
+            )
 
     def _create_variable(self, key, value):
         """Create a variable in the GitHub environment."""
