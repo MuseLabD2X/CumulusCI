@@ -12,7 +12,7 @@ concurrency: publishing
 jobs:
     publish-to-pypi:
         name: Publish new release to PyPI
-        runs-on: SFDO-Tooling-Ubuntu
+        runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
         steps:
             - uses: actions/checkout@main
             - name: Set up Python 3.8
@@ -42,3 +42,36 @@ jobs:
                     dist/*.tar.gz \
                     --notes-file changelog.md \
                     --title $VERSION
+            - name: Generate cumulusci.yml with version suffix
+              run: |
+                  VERSION="$(hatch version)"
+                  cp cumulusci/cumulusci.yml cumulusci/cumulusci-${VERSION}.yml
+            - name: Convert yml to json without indent
+              run: |
+                  VERSION="$(hatch version)"
+                  yq eval -o=json cumulusci/cumulusci-${VERSION}.yml > cumulusci/cumulusci-${VERSION}.json
+            - name: Generate JSON schema
+              run: |
+                  VERSION="$(hatch version)"
+                  cp cumulusci/schema/schema.json cumulusci/schema/schema-${VERSION}.json
+            - name: Upload release artifacts
+              uses: actions/upload-release-asset@v1
+              with:
+                  upload_url: ${{ steps.create_release.outputs.upload_url }}
+                  asset_path: cumulusci/cumulusci-${VERSION}.yml
+                  asset_name: cumulusci-${VERSION}.yml
+                  asset_content_type: application/x-yaml
+            - name: Upload JSON artifact
+              uses: actions/upload-release-asset@v1
+              with:
+                  upload_url: ${{ steps.create_release.outputs.upload_url }}
+                  asset_path: cumulusci/cumulusci-${VERSION}.json
+                  asset_name: cumulusci-${VERSION}.json
+                  asset_content_type: application/json
+            - name: Upload JSON schema
+              uses: actions/upload-release-asset@v1
+              with:
+                  upload_url: ${{ steps.create_release.outputs.upload_url }}
+                  asset_path: cumulusci/schema/schema-${VERSION}.json
+                  asset_name: schema-${VERSION}.json
+                  asset_content_type: application/json
