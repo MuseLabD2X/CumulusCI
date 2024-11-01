@@ -81,3 +81,6 @@ robot/CumulusCI/results/
 .vscode/
 .idea/
 tags
+
+# CumulusCI
+cumulusci/cumulusci.json
