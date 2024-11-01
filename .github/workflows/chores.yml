@@ -6,12 +6,9 @@ on:
         - cron: "0 0 * * 0" # At 00:00 on Sunday
 
 jobs:
-    check_api_versions:
-        name: 🔍 Check API Versions
+    update_api_versions:
+        name: 🔄 Update API Versions
         runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
-        outputs:
-            hub_version: ${{ steps.devhub-api-version.outputs.hub_version }}
-            cci_version: ${{ steps.cci-api-version.outputs.cci_version }}
         steps:
             - name: 📦 Checkout Code
               uses: actions/checkout@v3
@@ -19,52 +16,9 @@ jobs:
                   ref: main
             - name: 🐍 Set up Python
               uses: actions/setup-python@v4
-            - name: 📡 Get Dev Hub API Version
-              id: devhub-api-version
-              env:
-                  HUB_URL: ${{ format('{0}/services/data', secrets.SFDO_HUB_URL) }}
-              run: |
-                  echo "Fetching Dev Hub API version..."
-                  version=$(curl -s $HUB_URL | jq -r '.[-1] | .version')
-                  echo "::set-output name=hub_version::$version"
-            - name: 📄 Get CURRENT_SF_API_VERSION
-              id: cci-api-version
-              run: |
-                  echo "Fetching CURRENT_SF_API_VERSION..."
-                  version=$(yq '.project.package.api_version' cumulusci/cumulusci.yml)
-                  echo "::set-output name=cci_version::$version"
-    update_api_versions:
-        name: 🔄 Update API Versions
-        runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
-        needs: check_api_versions
-        if: ${{ needs.check_api_versions.outputs.hub_version != needs.check_api_versions.outputs.cci_version }}
-        env:
-            VERSION: ${{ needs.check_api_versions.outputs.hub_version }}
-        steps:
-            - name: 📦 Checkout Code
-              uses: actions/checkout@v3
               with:
-                  fetch-depth: 0
-                  ref: main
-            - name: 🔧 Set CURRENT_SF_API_VERSION
-              id: set-cci-api-version
-              run: |
-                  echo "Setting CURRENT_SF_API_VERSION..."
-                  yq --indent 4 --inplace '
-                    .project.package.api_version = strenv(VERSION)
-                  ' cumulusci/cumulusci.yml
-            - name: 💾 Commit changes
-              run: |
-                  echo "Committing API version updates..."
-                  git config user.name github-actions[bot]
-                  git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-                  git switch -c "update-sfdc-api-v$VERSION"
-                  git add cumulusci/cumulusci.yml
-                  git commit -m "Automated update to sfdc API version $VERSION"
-                  git push origin "update-sfdc-api-v$VERSION"
-            - name: 💌 Create Pull Request
+                  python-version: 3.8
+            - name: 🔄 Run Update API Versions Action
+              uses: ./.github/actions/update-api-versions
               env:
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  echo "Creating pull request for API version update..."
-                  gh pr create --fill --label 'auto-pr'
+                  SFDO_HUB_URL: ${{ secrets.SFDO_HUB_URL }}

@@ -1,0 +1,69 @@
+name: Create Artifacts 🛠️📦
+
+on:
+    workflow_call:
+        inputs:
+            python-version:
+                required: true
+                type: string
+        secrets:
+            PYPI_TOKEN:
+                required: true
+            GITHUB_TOKEN:
+                required: true
+
+jobs:
+    build_artifacts:
+        name: 🏗️ Build Artifacts
+        runs-on: ubuntu-latest
+        steps:
+            - name: 📦 Checkout Code
+              uses: actions/checkout@v3
+
+            - name: 🐍 Set up Python
+              uses: actions/setup-python@v4
+              with:
+                  python-version: ${{ inputs.python-version }}
+                  cache: pip
+
+            - name: 🛠️ Install Build Tools
+              run: |
+                  echo "Installing build tools..."
+                  python -m pip install hatch tomli tomli-w
+
+            - name: 📌 Pin Dependencies
+              run: |
+                  echo "Pinning dependencies..."
+                  python utility/pin_dependencies.py
+
+            - name: 🏗️ Build Source Tarball and Binary Wheel
+              run: |
+                  echo "Building packages..."
+                  hatch build -c
+
+            - name: 📄 Generate cumulusci.yml with Version Suffix
+              run: |
+                  echo "Generating cumulusci.yml with version suffix..."
+                  VERSION="$(hatch version)"
+                  cp cumulusci/cumulusci.yml cumulusci/cumulusci-${VERSION}.yml
+
+            - name: 🔄 Convert YAML to JSON Without Indent
+              run: |
+                  echo "Converting YAML to JSON..."
+                  VERSION="$(hatch version)"
+                  yq eval -o=json cumulusci/cumulusci-${VERSION}.yml > cumulusci/cumulusci-${VERSION}.json
+
+            - name: 🛠️ Generate JSON Schema
+              run: |
+                  echo "Generating JSON schema..."
+                  VERSION="$(hatch version)"
+                  cp cumulusci/schema/schema.json cumulusci/schema/schema-${VERSION}.json
+
+            - name: 📤 Upload Artifacts to Job Outputs
+              uses: actions/upload-artifact@v3
+              with:
+                  name: build-artifacts
+                  path: |
+                      cumulusci/cumulusci-*.yml
+                      cumulusci/cumulusci-*.json
+                      cumulusci/schema/schema-*.json
