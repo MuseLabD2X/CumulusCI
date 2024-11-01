@@ -10,7 +10,7 @@ on:
 jobs:
   test_artifacts:
     name: "Test Package Artifacts 📦"
-    runs-on: SFDO-Tooling-Ubuntu
+    runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
     steps:
       - name: "Checkout Repository 📂"
         uses: actions/checkout@v3
