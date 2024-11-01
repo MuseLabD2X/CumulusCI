@@ -35,21 +35,9 @@ jobs:
     create_and_store_artifacts:
         name: 📦 Create and Store Artifacts
         runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
-        needs: test_python_packaging
-        steps:
-            - name: 🔗 Call Create Artifacts Workflow
-              uses: ./.github/workflows/create_artifacts.yml
-              with:
-                  python-version: "3.8"
-              secrets:
-                  PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
-                  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-            - name: 📤 Download Artifacts
-              uses: actions/download-artifact@v3
-              with:
-                  name: build-artifacts
-            - name: 📥 Store Artifacts
-              uses: actions/upload-artifact@v3
-              with:
-                  name: build-artifacts
-                  path: build-artifacts/
+        uses: ./.github/workflows/create_artifacts.yml@main
+        with:
+            python-version: "3.8"
+        secrets:
+            PYPI_TOKEN: ${{ secrets.PYPI_TOKEN }}
+            GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
