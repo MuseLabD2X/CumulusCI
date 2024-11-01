@@ -31,36 +31,3 @@ jobs:
                   pip install dist/cumulusci*.whl
                   pip show cumulusci
                   pip uninstall -y cumulusci
-name: Release Test Python 🐍🔧
-
-on:
-    push:
-        branches:
-            - '**'
-
-jobs:
-    test_python_packaging:
-        name: 🐍 Test Packaging with Hatch
-        runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
-        steps:
-            - name: 📦 Checkout Code
-              uses: actions/checkout@v3
-            - name: 🐍 Set up Python 3.8
-              uses: actions/setup-python@v4
-              with:
-                  python-version: 3.8
-                  cache: pip
-            - name: 🛠️ Install Hatch
-              run: |
-                  echo "Installing Hatch..."
-                  pip install hatch
-            - name: 🏗️ Build Packages
-              run: |
-                  echo "Building packages..."
-                  hatch build
-            - name: 🧪 Test Built Packages
-              run: |
-                  echo "Testing built packages..."
-                  pip install dist/cumulusci*.whl
-                  pip show cumulusci
-                  pip uninstall -y cumulusci
