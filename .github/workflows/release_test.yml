@@ -1,4 +1,4 @@
-name: Release Test
+name: Release Test 🧪🔍
 
 on:
     pull_request:
@@ -33,32 +33,38 @@ env:
 
 jobs:
     test_artifacts:
-        name: "Test Package Artifacts"
-        runs-on: SFDO-Tooling-Ubuntu
+        name: 🧪 Test Package Artifacts
+        runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
         steps:
-            - uses: actions/checkout@v3
-            - name: Set up Python 3.8
+            - name: 📦 Checkout Code
+              uses: actions/checkout@v3
+            - name: 🐍 Set up Python 3.8
               uses: actions/setup-python@v4
               with:
                   python-version: 3.8
                   cache: pip
                   cache-dependency-path: "requirements/*.txt"
-            - name: Install build tools
-              run: pip install hatch
-            - name: Test source tarball and binary wheel
+            - name: 🛠️ Install build tools
               run: |
+                  echo "Installing Hatch..."
+                  pip install hatch
+            - name: ⚙️ Test source tarball and binary wheel
+              run: |
+                  echo "Building packages for testing..."
                   hatch build
-            - name: Test install of wheel
+            - name: 📦 Test install of wheel
               run: |
+                  echo "Testing wheel installation..."
                   pip install dist/cumulusci*.whl
                   pip show cumulusci
                   pip uninstall -y cumulusci
-            - name: Test install of sdist
+            - name: 📦 Test install of sdist
               run: |
+                  echo "Testing sdist installation..."
                   pip install dist/cumulusci*.tar.gz
                   pip show cumulusci
                   pip uninstall -y cumulusci
-            - name: Store artifacts
+            - name: 📤 Store artifacts
               if: failure()
               uses: actions/upload-artifact@v3
               with:
@@ -66,46 +72,56 @@ jobs:
                   path: dist
 
     test_release:
-        name: "Test Release Flows"
+        name: 🚀 Test Release Flows
         runs-on: SFDO-Tooling-Ubuntu
         concurrency: release
         steps:
-            - uses: actions/checkout@v3
-            - name: Set up Python 3.8
+            - name: �� Checkout Code
+              uses: actions/checkout@v3
+            - name: 🐍 Set up Python 3.8
               uses: actions/setup-python@v4
               with:
                   python-version: 3.8
                   cache: pip
                   cache-dependency-path: "requirements/*.txt"
-            - name: Install Python dependencies
-              run: pip install -r requirements_dev.txt
-            - name: Install sfdx
+            - name: 📥 Install Python dependencies
               run: |
+                  echo "Installing dependencies..."
+                  pip install -r requirements_dev.txt
+            - name: ⚙️ Install sfdx
+              run: |
+                  echo "Installing Salesforce CLI..."
                   mkdir sfdx
                   wget -qO- https://developer.salesforce.com/media/salesforce-cli/sfdx/channels/stable/sfdx-linux-x64.tar.xz | tar xJ -C sfdx --strip-components 1
                   echo $(realpath sfdx/bin) >> $GITHUB_PATH
-            - name: Authenticate Dev Hub
+            - name: 🔐 Authenticate Dev Hub
               run: |
+                  echo "Authenticating Dev Hub..."
                   sfdx plugins --core
                   echo $SFDX_HUB_KEY_BASE64 | base64 --decode > sfdx.key
                   sfdx auth:jwt:grant --clientid $SFDX_CLIENT_ID --jwtkeyfile sfdx.key --username $SFDX_HUB_USERNAME --setdefaultdevhubusername -a hub
-            - name: Check out CumulusCI-Test
+            - name: 📂 Check out CumulusCI-Test
               run: |
+                  echo "Cloning CumulusCI-Test repository..."
                   git clone https://github.com/SFDO-Tooling/CumulusCI-Test
-            - name: Run ci_feature flow
+            - name: ▶️ Run ci_feature flow
               run: |
+                  echo "Running ci_feature flow..."
                   cd CumulusCI-Test
                   coverage run --append --rcfile=../pyproject.toml --source=../cumulusci $(which cci) flow run ci_feature --org scratch --delete-org
-            - name: Run ci_beta flow
+            - name: ▶️ Run ci_beta flow
               run: |
+                  echo "Running ci_beta flow..."
                   cd CumulusCI-Test
                   coverage run --append --rcfile=../pyproject.toml --source=../cumulusci $(which cci) flow run ci_beta --org scratch --delete-org
-            - name: Run ci_master flow
+            - name: ▶️ Run ci_master flow
               run: |
+                  echo "Running ci_master flow..."
                   cd CumulusCI-Test
                   coverage run --append --rcfile=../pyproject.toml --source=../cumulusci $(which cci) flow run ci_master --org scratch --delete-org
-            - name: Run release_beta flow
+            - name: ▶️ Run release_beta flow
               run: |
+                  echo "Running release_beta flow..."
                   export SFDX_HUB_KEY="$(echo $SFDX_HUB_KEY_BASE64 | base64 --decode)"
                   cd CumulusCI-Test
                   coverage run --append --rcfile=../pyproject.toml --source=../cumulusci $(which cci) flow run release_beta --org packaging

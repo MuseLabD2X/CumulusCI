@@ -1,4 +1,4 @@
-name: Integration Tests
+name: Integration Tests 🧪
 
 on:
     pull_request_review:
@@ -21,27 +21,31 @@ env:
 
 jobs:
     org_backed_tests:
-        name: "Org-connected Tests"
-        runs-on: SFDO-Tooling-Ubuntu
+        name: 🏢 Org-connected Tests
+        runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
         steps:
-            - uses: actions/checkout@v2
-            - name: Set up Python 3.8
+            - name: 📦 Checkout Code
+              uses: actions/checkout@v2
+            - name: 🐍 Set up Python 3.8
               uses: actions/setup-python@v4
               with:
                   python-version: 3.8
                   cache: pip
                   cache-dependency-path: "requirements/*.txt"
-            - name: Install Python dependencies
+            - name: 📥 Install Python dependencies
               run: |
+                  echo "Installing dependencies..."
                   python -m pip install -U pip
                   pip install -r requirements_dev.txt
-            - name: Install sfdx
+            - name: ⚙️ Install sfdx
               run: |
+                  echo "Installing Salesforce CLI..."
                   mkdir sfdx
                   wget -qO- https://developer.salesforce.com/media/salesforce-cli/sfdx/channels/stable/sfdx-linux-x64.tar.xz | tar xJ -C sfdx --strip-components 1
                   echo $(realpath sfdx/bin) >> $GITHUB_PATH
-            - name: Authenticate Dev Hub
+            - name: 🔐 Authenticate Dev Hub
               run: |
+                  echo "Authenticating Dev Hub..."
                   sfdx plugins --core
                   echo $SFDX_HUB_KEY_BASE64 | base64 --decode > sfdx.key
                   sfdx auth:jwt:grant --clientid $SFDX_CLIENT_ID --jwtkeyfile sfdx.key --username $SFDX_HUB_USERNAME --setdefaultdevhubusername -a hub
@@ -49,15 +53,16 @@ jobs:
                   SFDX_HUB_KEY_BASE64: ${{ secrets.SFDX_HUB_KEY_BASE64 }}
                   SFDX_CLIENT_ID: ${{ secrets.SFDX_CLIENT_ID }}
                   SFDX_HUB_USERNAME: ${{ secrets.SFDX_HUB_USERNAME }}
-            - name: Re-make VCR tapes (transiently)
+            - name: 📼 Re-make VCR tapes (transiently)
               run: make vcr
-            - name: Delete scratch org
+            - name: 🧹 Delete scratch org
               if: always()
               run: |
+                  echo "Deleting scratch org..."
                   cci org scratch_delete pytest
     robot_ui:
-        name: "Robot: ${{ matrix.job-name }}"
-        runs-on: SFDO-Tooling-Ubuntu
+        name: 🤖 Robot Tests: ${{ matrix.job-name }}
+        runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
         strategy:
             fail-fast: false
             matrix:
@@ -72,24 +77,31 @@ jobs:
                     #   job-name: "Pre-release"
                     #   org-shape: "prerelease"
         steps:
-            - uses: actions/checkout@v2
-            - name: Set up Python 3.8
+            - name: 📦 Checkout Code
+              uses: actions/checkout@v2
+            - name: 🐍 Set up Python 3.8
               uses: actions/setup-python@v4
               with:
                   python-version: 3.8
                   cache: pip
                   cache-dependency-path: "requirements/*.txt"
-            - name: Install Python dependencies
-              run: pip install -r requirements_dev.txt
-            - name: Install sfdx
+            - name: 📥 Install Python dependencies
               run: |
+                  echo "Installing dependencies..."
+                  pip install -r requirements_dev.txt
+            - name: ⚙️ Install sfdx
+              run: |
+                  echo "Installing Salesforce CLI..."
                   mkdir sfdx
-                  wget -qO- https://developer.salesforce.com/media/salesforce-cli/sfdx/channels/stable/sf-linux-x64.tar.xz | tar xJ -C sfdx --strip-components 1
+                  wget -qO- https://developer.salesforce.com/media/salesforce-cli/sf-linux-x64.tar.xz | tar xJ -C sfdx --strip-components 1
                   echo $(realpath sfdx/bin) >> $GITHUB_PATH
-            - name: Initialize Browser/Playwright
-              run: cci robot install_playwright
-            - name: Authenticate Dev Hub
+            - name: 🖥️ Initialize Browser/Playwright
               run: |
+                  echo "Initializing Playwright..."
+                  cci robot install_playwright
+            - name: 🔐 Authenticate Dev Hub
+              run: |
+                  echo "Authenticating Dev Hub..."
                   sfdx plugins --core
                   echo $SFDX_HUB_KEY_BASE64 | base64 --decode > sfdx.key
                   sf org login jwt --client-id $SFDX_CLIENT_ID --jwt-key-file sfdx.key --username $SFDX_HUB_USERNAME --setdefaultdevhubusername -a hub
@@ -97,18 +109,20 @@ jobs:
                   SFDX_HUB_KEY_BASE64: ${{ secrets.SFDX_HUB_KEY_BASE64 }}
                   SFDX_CLIENT_ID: ${{ secrets.SFDX_CLIENT_ID }}
                   SFDX_HUB_USERNAME: ${{ secrets.SFDX_HUB_USERNAME }}
-            - name: Run robot tests
+            - name: 🏃 Run robot tests
               run: |
+                  echo "Running robot tests..."
                   coverage run --append $(which cci) task run robot \
                     --org ${{ matrix.org-shape }} \
                     -o suites cumulusci/robotframework/tests/salesforce \
                     -o exclude no-browser \
                     -o vars ${{ matrix.browser }}
-            - name: Delete scratch org
+            - name: 🧹 Delete scratch org
               if: always()
               run: |
+                  echo "Deleting scratch org..."
                   cci org scratch_delete ${{ matrix.org-shape }}
-            - name: Store robot results
+            - name: 📤 Store robot results
               if: failure()
               uses: actions/upload-artifact@v4
               with:

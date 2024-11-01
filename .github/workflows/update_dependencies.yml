@@ -1,10 +1,15 @@
-name: Update Python Dependencies
+name: Update Python Dependencies 🚀
 
 on:
     workflow_dispatch:
 
 jobs:
     update_python_dependencies:
+        name: 🛠️ Update Python Dependencies
+        runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
         uses: SFDO-Tooling/.github/.github/workflows/update_python_dependencies.yml@main
         with:
             python-version: 3.8
+        steps:
+            - name: 📦 Checkout Code
+              uses: actions/checkout@v2

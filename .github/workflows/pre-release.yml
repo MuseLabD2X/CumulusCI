@@ -1,4 +1,4 @@
-name: Draft release pull request
+name: Draft Release Pull Request 📝🔧
 
 on:
     workflow_dispatch:
@@ -18,26 +18,32 @@ on:
 
 jobs:
     generate-changelog:
-        name: Create a PR to update version and release notes
-        runs-on: SFDO-Tooling-Ubuntu
+        name: 📄 Create PR for Version & Release Notes
+        runs-on: ${{ github.repository_owner == 'SFDO-Tooling' && 'SFDO-Tooling-Ubuntu' || 'ubuntu-latest' }}
         steps:
-            - uses: actions/checkout@main
-            - name: Set up Python 3.8
+            - name: 📦 Checkout Code
+              uses: actions/checkout@main
+            - name: 🐍 Set up Python 3.8
               uses: actions/setup-python@v4
               with:
                   python-version: 3.8
                   cache: pip
-            - name: Install build tool
-              run: python -m pip install hatch
-            - name: Bump version
-              run: hatch version $VERSION
+            - name: 🛠️ Install build tool
+              run: |
+                  echo "Installing Hatch..."
+                  python -m pip install hatch
+            - name: 🔢 Bump version
+              run: |
+                  echo "Bumping version..."
+                  hatch version $VERSION
               env:
                   VERSION: ${{ inputs.version }}
-            - name: Generate release notes
+            - name: 📝 Generate release notes
               id: changelog
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
+                  echo "Generating release notes..."
                   PREVIOUS_VERSION=$(gh release view --json tagName --jq .tagName)
                   NEXT_VERSION="v$(hatch version)"
                   echo "## $NEXT_VERSION ($(date -I))" > changelog.md
@@ -52,20 +58,23 @@ jobs:
                     sed -e 's_\(https.*\/\)\([0-9]*\)$_[#\2](\1\2)_' \
                         -e 's_by @\(.*\) in_by [@\1](https://github.com/\1) in_' >> changelog.md
                   python utility/update-history.py
-            - name: Lint history
+            - name: 📐 Lint history
               run: |
+                  echo "Linting history..."
                   npm install prettier
                   npx prettier --write docs/history.md
-            - name: Commit changes
+            - name: 💾 Commit changes
               run: |
+                  echo "Committing changes..."
                   git config user.name github-actions[bot]
                   git config user.email 41898282+github-actions[bot]@users.noreply.github.com
                   git switch -c "release-$(hatch version)"
                   git add docs/history.md cumulusci/__about__.py
                   git commit -m "Update changelog (automated)"
                   git push origin "release-$(hatch version)"
-            - name: Commit changes and open PR
+            - name: 💌 Commit changes and open PR
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
+                  echo "Creating pull request..."
                   gh pr create --title "Release v$(hatch version)" --fill --label 'auto-pr'
