@@ -1,4 +1,4 @@
-name: Publish and release CumulusCI
+name: Publish and release CumulusCI 🚀
 
 on:
     push:
@@ -11,27 +11,29 @@ concurrency: publishing
 
 jobs:
     publish-to-pypi:
-        name: Publish new release to PyPI
+        name: Publish new release to PyPI 📦
         runs-on: SFDO-Tooling-Ubuntu
         steps:
             - uses: actions/checkout@main
-            - name: Set up Python 3.8
+            - name: Set up Python 3.8 🐍
               uses: actions/setup-python@v4
               with:
                   python-version: 3.8
                   cache: pip
-            - name: Install build tools
+            - name: Install build tools 🛠️
               run: python -m pip install hatch tomli tomli-w
-            - name: Pin dependencies
+            - name: Pin dependencies 📌
               run: python utility/pin_dependencies.py
-            - name: Build source tarball and binary wheel
+            - name: Build source tarball and binary wheel 📦
               run: hatch build -c
-            - name: Upload to PyPI
+            - name: Convert cumulusci.yml to cumulusci.json 🔄
+              run: python -c "import yaml, json; json.dump(yaml.safe_load(open('cumulusci/cumulusci.yml')), open('cumulusci/cumulusci.json', 'w'))"
+            - name: Upload to PyPI 🚀
               run: hatch publish
               env:
                   HATCH_INDEX_USER: "__token__"
                   HATCH_INDEX_AUTH: ${{ secrets.PYPI_TOKEN }}
-            - name: Create release
+            - name: Create release 📝
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
@@ -40,5 +42,8 @@ jobs:
                   gh release create "v$VERSION" \
                     dist/*.whl \
                     dist/*.tar.gz \
+                    cumulusci/cumulusci.yml \
+                    cumulusci/cumulusci.json \
+                    cumulusci/schema/cumulusci.jsonschema.json \
                     --notes-file changelog.md \
                     --title $VERSION

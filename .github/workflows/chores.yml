@@ -7,46 +7,50 @@ on:
 
 jobs:
     check_api_versions:
+        name: "Check API Versions 🔍"
         runs-on: SFDO-Tooling-Ubuntu
         outputs:
             hub_version: ${{ steps.devhub-api-version.outputs.hub_version }}
             cci_version: ${{ steps.cci-api-version.outputs.cci_version }}
         steps:
-            - uses: actions/checkout@v3
+            - name: "Checkout Repository 📂"
+              uses: actions/checkout@v3
               with:
                   ref: main
-            - name: Set up Python
+            - name: "Set up Python 🐍"
               uses: actions/setup-python@v4
-            - name: Get Dev Hub API Version
+            - name: "Get Dev Hub API Version 🌐"
               id: devhub-api-version
               env:
                   HUB_URL: ${{ format('{0}/services/data', secrets.SFDO_HUB_URL) }}
               run: |
                   version=$(curl -s $HUB_URL | jq -r '.[-1] | .version')
                   echo "::set-output name=hub_version::$version"
-            - name: Get CURRENT_SF_API_VERSION
+            - name: "Get CURRENT_SF_API_VERSION 📦"
               id: cci-api-version
               run: |
                   version=$(yq '.project.package.api_version' cumulusci/cumulusci.yml)
                   echo "::set-output name=cci_version::$version"
     update_api_versions:
+        name: "Update API Versions 🔄"
         runs-on: SFDO-Tooling-Ubuntu
         needs: check_api_versions
         if: ${{ needs.check_api_versions.outputs.hub_version != needs.check_api_versions.outputs.cci_version }}
         env:
             VERSION: ${{ needs.check_api_versions.outputs.hub_version }}
         steps:
-            - uses: actions/checkout@v3
+            - name: "Checkout Repository 📂"
+              uses: actions/checkout@v3
               with:
                   fetch-depth: 0
                   ref: main
-            - name: Set CURRENT_SF_API_VERSION
+            - name: "Set CURRENT_SF_API_VERSION 📦"
               id: set-cci-api-version
               run: |
                   yq --indent 4 --inplace '
                     .project.package.api_version = strenv(VERSION)
                   ' cumulusci/cumulusci.yml
-            - name: Commit changes
+            - name: "Commit changes 📝"
               run: |
                   git config user.name github-actions[bot]
                   git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -54,7 +58,8 @@ jobs:
                   git add cumulusci/cumulusci.yml
                   git commit -m "Automated update to sfdc API version $VERSION"
                   git push origin "update-sfdc-api-v$VERSION"
-            - env:
+            - name: "Create Pull Request 📋"
+              env:
                   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
                   gh pr create --fill --label 'auto-pr'

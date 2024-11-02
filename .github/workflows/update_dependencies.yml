@@ -5,6 +5,22 @@ on:
 
 jobs:
     update_python_dependencies:
-        uses: SFDO-Tooling/.github/.github/workflows/update_python_dependencies.yml@main
-        with:
-            python-version: 3.8
+        name: "Update Python Dependencies 📦"
+        runs-on: SFDO-Tooling-Ubuntu
+        steps:
+            - name: "Checkout Repository 📂"
+              uses: actions/checkout@v3
+            - name: "Set up Python 3.8 🐍"
+              uses: actions/setup-python@v4
+              with:
+                  python-version: 3.8
+                  cache: pip
+            - name: "Update dependencies 🔄"
+              run: pip install --upgrade -r requirements.txt
+            - name: "Commit changes 📝"
+              run: |
+                  git config user.name github-actions[bot]
+                  git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+                  git add requirements.txt
+                  git commit -m "Update dependencies"
+                  git push

@@ -18,22 +18,23 @@ on:
 
 jobs:
     generate-changelog:
-        name: Create a PR to update version and release notes
+        name: "Create a PR to update version and release notes 📝"
         runs-on: SFDO-Tooling-Ubuntu
         steps:
-            - uses: actions/checkout@main
-            - name: Set up Python 3.8
+            - name: "Checkout Repository 📂"
+              uses: actions/checkout@main
+            - name: "Set up Python 3.8 🐍"
               uses: actions/setup-python@v4
               with:
                   python-version: 3.8
                   cache: pip
-            - name: Install build tool
+            - name: "Install build tool 🛠️"
               run: python -m pip install hatch
-            - name: Bump version
+            - name: "Bump version 🔄"
               run: hatch version $VERSION
               env:
                   VERSION: ${{ inputs.version }}
-            - name: Generate release notes
+            - name: "Generate release notes 📝"
               id: changelog
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -52,11 +53,11 @@ jobs:
                     sed -e 's_\(https.*\/\)\([0-9]*\)$_[#\2](\1\2)_' \
                         -e 's_by @\(.*\) in_by [@\1](https://github.com/\1) in_' >> changelog.md
                   python utility/update-history.py
-            - name: Lint history
+            - name: "Lint history 📜"
               run: |
                   npm install prettier
                   npx prettier --write docs/history.md
-            - name: Commit changes
+            - name: "Commit changes 📝"
               run: |
                   git config user.name github-actions[bot]
                   git config user.email 41898282+github-actions[bot]@users.noreply.github.com
@@ -64,7 +65,7 @@ jobs:
                   git add docs/history.md cumulusci/__about__.py
                   git commit -m "Update changelog (automated)"
                   git push origin "release-$(hatch version)"
-            - name: Commit changes and open PR
+            - name: "Commit changes and open PR 📋"
               env:
                   GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
               run: |
