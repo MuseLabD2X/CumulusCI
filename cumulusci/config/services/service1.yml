@@ -1,0 +1,7 @@
+# Sample service configuration file
+service:
+  name: service1
+  description: This is a sample service configuration.
+  config:
+    key1: value1
+    key2: value2

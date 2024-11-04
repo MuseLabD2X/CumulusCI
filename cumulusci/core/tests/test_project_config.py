@@ -75,3 +75,44 @@ class TestBaseProjectConfig(unittest.TestCase):
         self.assertEqual(merged["key2"]["subkey1"], "subvalue1")
         self.assertEqual(merged["key2"]["subkey2"], "subvalue2")
         self.assertEqual(merged["key3"], "value3")
+
+    def test_load_config_with_symlinks(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config_dir = Path(tempdir) / "cumulusci.d"
+            config_dir.mkdir()
+            (config_dir / ".order.yml").write_text("component1.yml\ncomponent2.yml\n")
+            (config_dir / "component1.yml").write_text("key1: value1\n")
+            (config_dir / "component2.yml").write_text("key2: value2\n")
+
+            symlink_dir = Path(tempdir) / "symlinked_config"
+            symlink_dir.mkdir()
+            (symlink_dir / ".order.yml").write_text("symlinked_component.yml\n")
+            (symlink_dir / "symlinked_component.yml").write_text("key3: value3\n")
+
+            os.symlink(symlink_dir, config_dir / "symlinked")
+
+            folder_config = self.project_config._load_folder_config()
+            self.assertEqual(folder_config["key1"], "value1")
+            self.assertEqual(folder_config["key2"], "value2")
+            self.assertEqual(folder_config["key3"], "value3")
+
+    def test_load_config_with_copying(self):
+        with tempfile.TemporaryDirectory() as tempdir:
+            config_dir = Path(tempdir) / "cumulusci.d"
+            config_dir.mkdir()
+            (config_dir / ".order.yml").write_text("component1.yml\ncomponent2.yml\n")
+            (config_dir / "component1.yml").write_text("key1: value1\n")
+            (config_dir / "component2.yml").write_text("key2: value2\n")
+
+            copied_dir = Path(tempdir) / "copied_config"
+            copied_dir.mkdir()
+            (copied_dir / ".order.yml").write_text("copied_component.yml\n")
+            (copied_dir / "copied_component.yml").write_text("key3: value3\n")
+
+            for item in copied_dir.iterdir():
+                (config_dir / item.name).write_text(item.read_text())
+
+            folder_config = self.project_config._load_folder_config()
+            self.assertEqual(folder_config["key1"], "value1")
+            self.assertEqual(folder_config["key2"], "value2")
+            self.assertEqual(folder_config["key3"], "value3")

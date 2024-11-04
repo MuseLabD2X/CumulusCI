@@ -1,0 +1,14 @@
+# Sample flow configuration file
+
+flows:
+  flow1:
+    description: "This is a sample flow configuration"
+    steps:
+      1:
+        task: task1
+        options:
+          option1: value1
+      2:
+        task: task2
+        options:
+          option2: value2

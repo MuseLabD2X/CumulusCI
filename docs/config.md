@@ -1062,7 +1062,7 @@ flows:
   upgrade_1_2_to_1_3:
     description: Just a test
 """ > upgrades/1-2_to_1-3.yml
-ln -s upgrades/1-2_to_1-3.yml cumulusci.d/
+ln -s upgrades/1-2_to-1-3.yml cumulusci.d/
 cci flow run upgrade_1_2_to_1_3
 rm cumulusci.d/1-2_to_1-3.yml
 ```
