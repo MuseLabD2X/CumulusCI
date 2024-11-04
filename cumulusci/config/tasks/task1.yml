@@ -1,0 +1,7 @@
+# Sample task configuration file
+task1:
+  description: "This is a sample task configuration"
+  class_path: "cumulusci.tasks.sample.SampleTask"
+  options:
+    option1: "value1"
+    option2: "value2"

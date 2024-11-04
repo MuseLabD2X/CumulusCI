@@ -61,3 +61,12 @@ tasks:
         options:
             required_org_code_coverage_percent: {{code_coverage}}
     {% endif %}
+
+# Example of folder-based configuration
+cumulusci.d:
+    .order.yml:
+        - tasks/
+        - flows/
+        - orgs/
+        - services/
+        - cumulusci.yml

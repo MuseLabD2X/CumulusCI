@@ -908,3 +908,163 @@ how a task or flow is _currently_ configured. The information output by
 these commands change as you make further customizations to your
 project's `cumulusci.yml` file.
 ```
+
+## Folder-Based Configuration
+
+CumulusCI supports a folder-based configuration approach, allowing you to organize your configurations into logical groups and control the loading order using `.order.yml` files. This approach enhances flexibility, organization, and scalability by allowing configurations to be modularized and easily maintained.
+
+### Directory Structure
+
+The `cumulusci.d/` directory serves as the central hub for all configuration fragments. Here's a recommended structure:
+
+```
+project-root/
+│
+├── cumulusci.d/
+│   ├── .order.yml
+│   ├── tasks/
+│   │   ├── .order.yml
+│   │   ├── task1.yml
+│   │   └── task2.yml
+│   ├── flows/
+│   │   ├── .order.yml
+│   │   ├── flow1.yml
+│   │   └── flow2.yml
+│   ├── orgs/
+│   │   ├── org1.yml
+│   │   └── org2.yml
+│   ├── services/
+│   │   ├── .order.yml
+│   │   ├── service1.yml
+│   │   └── service2.yml
+│   └── cumulusci.yml
+│
+└── cumulusci.yml (optional single file for simplicity)
+```
+
+### `.order.yml` Files
+
+The `.order.yml` files define the order in which configuration files are loaded and specify explicit inclusions. They can exist at the root of `cumulusci.d/` and within any subdirectories.
+
+#### Example `.order.yml` at the root of `cumulusci.d/`:
+
+```yaml
+# cumulusci.d/.order.yml
+- tasks/
+- flows/
+- orgs/
+- services/
+- cumulusci.yml
+```
+
+#### Example `.order.yml` within the `tasks/` directory:
+
+```yaml
+# cumulusci.d/tasks/.order.yml
+- task1.yml
+- task2.yml
+```
+
+### Configuration Loading and Merging
+
+CumulusCI loads configurations from the `cumulusci.d/` directory and merges them according to the order specified in the `.order.yml` files. The loading process follows these steps:
+
+1. **Check for `cumulusci.d/` Directory:**
+   - If `cumulusci.d/` exists:
+     - Load the `.order.yml` file to determine the loading sequence.
+     - Iterate through the specified files and subdirectories in the order defined.
+     - Recursively load and merge configurations from subdirectories, respecting their own `.order.yml` files.
+   - Else:
+     - Check for the presence of a single `cumulusci.yml` file and load it as the primary configuration.
+
+2. **Merging Strategy:**
+   - **Override Behavior:** Later configurations can override earlier ones based on the loading order.
+   - **Deep Merge:** Support nested structures, ensuring that complex configurations are merged correctly without data loss.
+   - **Conflict Resolution:** Implement rules to handle conflicts, such as prioritizing specific directories or filenames.
+
+### Example Usage Scenario
+
+Imagine you are managing a project with multiple components: tasks, flows, orgs, and services. Using the folder-based configuration approach, your configuration might look like this:
+
+```
+project-root/
+│
+├── cumulusci.d/
+│   ├── .order.yml
+│   ├── tasks/
+│   │   ├── .order.yml
+│   │   ├── task1.yml
+│   │   └── task2.yml
+│   ├── flows/
+│   │   ├── .order.yml
+│   │   ├── flow1.yml
+│   │   └── flow2.yml
+│   ├── orgs/
+│   │   ├── org1.yml
+│   │   └── org2.yml
+│   ├── services/
+│   │   ├── .order.yml
+│   │   ├── service1.yml
+│   │   └── service2.yml
+│   └── cumulusci.yml
+│
+└── cumulusci.yml (optional single file for simplicity)
+```
+
+**`cumulusci.d/.order.yml`:**
+```yaml
+- tasks/
+- flows/
+- orgs/
+- services/
+- cumulusci.yml
+```
+
+**`cumulusci.d/tasks/.order.yml`:**
+```yaml
+- task1.yml
+- task2.yml
+```
+
+**`cumulusci.d/tasks/task1.yml`:**
+```yaml
+task1:
+    description: Task 1 description
+    class_path: cumulusci.tasks.salesforce.Task1
+    options:
+        option1: value1
+```
+
+**`cumulusci.d/tasks/task2.yml`:**
+```yaml
+task2:
+    description: Task 2 description
+    class_path: cumulusci.tasks.salesforce.Task2
+    options:
+        option2: value2
+```
+
+When the configuration is loaded, CumulusCI processes `cumulusci.d/.order.yml`, loading the `tasks/`, `flows/`, `orgs/`, and `services/` directories in the specified order. The resulting merged configuration would include the configurations from all the specified files and directories.
+
+By adopting the folder-based configuration approach, you can enhance the organization, maintainability, and scalability of your CumulusCI configurations.
+
+### Using Symlinks and Copying Files
+
+The folder-based configuration structure also enables the use of symlinks or copying of files in builds to easily override CumulusCI's configuration. This can be particularly useful in scenarios where you need to customize configurations for different environments or deployments.
+
+#### Using Symlinks
+
+You can create symbolic links to configuration files or directories to override specific configurations. For example, you can create a symlink to a custom `cumulusci.yml` file for a specific environment:
+
+```sh
+echo """
+flows:
+  upgrade_1_2_to_1_3:
+    description: Just a test
+""" > upgrades/1-2_to_1-3.yml
+ln -s upgrades/1-2_to-1-3.yml cumulusci.d/
+cci flow run upgrade_1_2_to_1_3
+rm cumulusci.d/1-2_to_1-3.yml
+```
+
+This allows you to maintain separate configuration files for different environments and easily switch between them by updating the symlink.

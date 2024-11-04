@@ -183,6 +183,11 @@ class BaseProjectConfig(BaseTaskFlowConfig, ProjectConfigPropertiesMixin):
             if additional_yaml_config:
                 self.config_additional_yaml.update(additional_yaml_config)
 
+        # Load configurations from folders and merge them
+        folder_config = self._load_folder_config()
+        if folder_config:
+            self.config_project.update(folder_config)
+
         self.config = merge_config(
             {
                 "universal_config": self.config_universal,
@@ -207,6 +212,56 @@ class BaseProjectConfig(BaseTaskFlowConfig, ProjectConfigPropertiesMixin):
                 f"Package API Version must be in the form 'XX.0', found: {api_version}"
             )
             raise ConfigError(message)
+
+    def _load_folder_config(self) -> dict:
+        """Load configurations from folders and merge them"""
+        folder_config = {}
+        config_dir = Path(self.repo_root) / "cumulusci.d"
+        if config_dir.is_dir():
+            order_file = config_dir / ".order.yml"
+            if order_file.is_file():
+                order = cci_safe_load(order_file, logger=self.logger)
+                for item in order:
+                    item_path = config_dir / item
+                    if item_path.is_dir():
+                        sub_config = self._load_folder_config_recursive(item_path)
+                        folder_config = merge_config(folder_config, sub_config)
+                    elif item_path.is_file():
+                        data = cci_safe_load(item_path, logger=self.logger)
+                        folder_config = merge_config(folder_config, data)
+            else:
+                for item in sorted(config_dir.iterdir()):
+                    if item.is_dir():
+                        sub_config = self._load_folder_config_recursive(item)
+                        folder_config = merge_config(folder_config, sub_config)
+                    elif item.is_file():
+                        data = cci_safe_load(item, logger=self.logger)
+                        folder_config = merge_config(folder_config, data)
+        return folder_config
+
+    def _load_folder_config_recursive(self, directory: Path) -> dict:
+        """Recursively load configurations from subdirectories"""
+        sub_config = {}
+        order_file = directory / ".order.yml"
+        if order_file.is_file():
+            order = cci_safe_load(order_file, logger=self.logger)
+            for item in order:
+                item_path = directory / item
+                if item_path.is_dir():
+                    nested_config = self._load_folder_config_recursive(item_path)
+                    sub_config = merge_config(sub_config, nested_config)
+                elif item_path.is_file():
+                    data = cci_safe_load(item_path, logger=self.logger)
+                    sub_config = merge_config(sub_config, data)
+        else:
+            for item in sorted(directory.iterdir()):
+                if item.is_dir():
+                    nested_config = self._load_folder_config_recursive(item)
+                    sub_config = merge_config(sub_config, nested_config)
+                elif item.is_file():
+                    data = cci_safe_load(item, logger=self.logger)
+                    sub_config = merge_config(sub_config, data)
+        return sub_config
 
     @property
     def config_global(self) -> dict:

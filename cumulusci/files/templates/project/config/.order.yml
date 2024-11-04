@@ -1,0 +1,7 @@
+# Example .order.yml file for cumulusci.d directory
+
+- tasks/
+- flows/
+- orgs/
+- services/
+- cumulusci.yml

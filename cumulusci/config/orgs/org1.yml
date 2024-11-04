@@ -1,0 +1,10 @@
+# Sample org configuration file
+
+orgs:
+  org1:
+    username: user@example.com
+    password: secretpassword
+    security_token: token123
+    instance_url: https://login.salesforce.com
+    client_id: 1234567890
+    client_secret: abcdefghijklmnopqrstuvwxyz
