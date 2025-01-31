@@ -55,6 +55,7 @@ dependencies = [
     "simple-salesforce==1.11.4",
     "snowfakery>=4.0.0",
     "xmltodict",
+    "docutils>=0.21.2",
 ]
 
 [dependency-groups]
@@ -82,6 +83,14 @@ lint = [
     "flake8<4",
     "isort>=5.13.2",
     "pre-commit>=3.5.0",
+]
+
+[project.optional-dependencies]
+select = [
+    "annoy",
+    "numpy",
+    "pandas",
+    "scikit-learn",
 ]
 
 [project.scripts]
